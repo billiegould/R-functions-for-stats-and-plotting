@@ -6,13 +6,12 @@ source("~/Desktop/puffin/R/helper_functions.R")
 ##' @param variant.type "snv" or "cnv" input type
 ##'  @param df_samples optional data frame of sample ids and clinical data to include in output
 ##'  @param maf.output optional whether to only output required MAF cols. default: TRUE 
-##'  @param sid.format optionally use "strict" format for standardizing SampleIDs (first 7 characters only). defaut:FALSE 
-##'  @param sid.remove.suffix optionally remove characters after first "_" in SampleIDs. default: FALSE
+##'  @param sid.format optionally format for standardizing SampleIDs. defaut:"none" 
 ##'  @param warn optionally turn on warnings about NAs in merged coumns. defaut: TRUE
 ##' 
 ##' @return a MAF formatted data frame containing somatic variants (germline CNVs are removed if present)
 format_as_MAF <- function(variant.data, df_samples=NULL, variant.type="unknown", maf.output=TRUE,
-                          sid.format=NA, sid.remove.suffix=TRUE, warn=TRUE){
+                          sid.format="none", warn=TRUE){
   
   add_maf_cols <- function(variant.data, maf_cols){
     for (new_col in names(maf_cols)){
@@ -33,9 +32,9 @@ format_as_MAF <- function(variant.data, df_samples=NULL, variant.type="unknown",
     return(variant.data)
   }
   
-  variant.data = standardize_names(variant.data, sid.format=sid.format, sid.remove.suffix = sid.remove.suffix, warn=F)
+  variant.data = standardize_names(variant.data, sid.format=sid.format, warn=F)
   if (!is.null(df_samples)){
-    df_samples = standardize_names(df_samples, input.type="samples",sid.format=sid.format,sid.remove.suffix = sid.remove.suffix, warn=F)
+    df_samples = standardize_names(df_samples, input.type="samples",sid.format=sid.format, warn=F)
     variant.data = variant.data %>% filter(SampleID.short %in% df_samples$SampleID.short)
     variant.data = merge.combine(join.type="inner", 
                                  join.cols.left="SampleID.short", 
@@ -105,7 +104,6 @@ format_as_MAF <- function(variant.data, df_samples=NULL, variant.type="unknown",
                             unite(Tumor_Sample_Barcode, c(SampleID.short,PatientID,StudyVisit,SampleType), remove=F)
       warn_na(df_snvs[ ,names(maf_cols)])
     }
-    
     print(sprintf("Selected snvs: %s", nrow(df_snvs %>% filter(is.na(Variant_Classification) | Variant_Classification != "N.A."))))
     return(df_snvs)
     

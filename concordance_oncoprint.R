@@ -87,6 +87,7 @@ recode.variants <- function(variants, var.reduc.set=NULL, cnv.strings=c("Gain","
 ##' 
 ##' @return return a vector of classifications same length as input vector
 set_variant_colors <- function(variant.types=NA, var.colors=NULL, cnv.strings=c("Gain","Loss")){
+  print("set_variant_colors . . .")
   if ((is.vector(var.colors) | is.list(var.colors)) & !is.null(names(var.colors))) {
       print("Using input custom variant colors.")
       print(var.colors)
@@ -137,6 +138,7 @@ set_variant_colors <- function(variant.types=NA, var.colors=NULL, cnv.strings=c(
   }
   var.colors[["Multi_hit"]] = "black"
   print(var.colors)
+  "complete."
   return(var.colors) # a named list
 }
 
@@ -174,6 +176,7 @@ call_variants <- function(data, cnv.strings=NA){
 ##' @return returns a data frame containing oncoplot annotaitons, rows=genes, cols=patients.
 ##' 
 format_oncoprint_data <- function (variant_data, df_samples, sample_types=NA, cnv.strings=c("Gain","Loss")){
+  print("format_oncoprint_data . . .")
   reqd_cols = c("Hugo_Symbol", "PatientID", "Variant_Classification", "SampleID.short", "SampleType", "StudyVisit")
   if (any(reqd_cols %!in% names(variant_data))){
     print("Missing data input cols in variant data:") 
@@ -183,7 +186,7 @@ format_oncoprint_data <- function (variant_data, df_samples, sample_types=NA, cn
   if (is.na(cnv.strings[1]) |is.na(cnv.strings[2]) ){
     stop("Must define cnv.strings")
   }
-  print(sprintf("Input paired sample types: %s", sample_types))
+  print(glue("Input paired sample types: {sample_types}"))
   variant_data = variant_data %>% filter(SampleID.short %in% df_samples$SampleID.short) %>%
     mutate("sample_type"=paste0(StudyVisit,"_",SampleType)) %>%
     filter(Variant_Classification != "N.A.", Hugo_Symbol != "UnknownGene")  #TODO: move this filter earlier in pipe
@@ -236,6 +239,7 @@ format_oncoprint_data <- function (variant_data, df_samples, sample_types=NA, cn
   rownames(df_plot_data) = genes
   stopifnot(length(names(df_plot_data)) == length(unique(df_samples$PatientID)))
   #print(grep("NULL", df_plot_data))
+  print("complete.")
   return(df_plot_data)
 }
 
@@ -254,6 +258,7 @@ format_oncoprint_data <- function (variant_data, df_samples, sample_types=NA, cn
 create_alter_fun <- function(variant_classes, l = 0.05, var.colors="random", background_col="snow2",
                              ref_sample_type = NA, mrd_sample_type = NA, cnv.strings=c("Gain","Loss"),
                              make.legend=FALSE, concord.barplot=FALSE){
+  print("create_alter_fun . . .")
   stopifnot(all(!(is.na(var.colors))))
   ref_sample_type = tolower(ref_sample_type)
   mrd_sample_type = tolower(mrd_sample_type)
@@ -323,6 +328,7 @@ create_alter_fun <- function(variant_classes, l = 0.05, var.colors="random", bac
       })
     }
   }
+  print("complete.")
   return(alter_fun)
 }
 
@@ -341,6 +347,7 @@ create_alter_fun <- function(variant_classes, l = 0.05, var.colors="random", bac
 make_oncoprint_legend <- function(variant_classes, var.colors="random", background_col="snow2",
                                   ref_sample_type = NA, mrd_sample_type = NA, cnv.strings=c("Gain","Loss"),
                                   concord.barplot=FALSE, l=0.05, plot.file=NA){
+  print("make_oncoprint_legend . . .")
   half_fill_w = (1-l)/2
   manual_lgds = NA
   graphics = list()
@@ -391,7 +398,7 @@ make_oncoprint_legend <- function(variant_classes, var.colors="random", backgrou
   jpeg(paste0(plot.file,".jpg"), width=3, height=5, units="in", res=300)
   draw(manual_lgds)
   dev.off()
-  
+  print("complete.")
   return(manual_lgds)
 }
 
@@ -404,7 +411,6 @@ make_oncoprint_legend <- function(variant_classes, var.colors="random", backgrou
 ##' @param df_samples required data frame with sampleIDs to include. req'd cols: SampleID,PatientID,StudyVisit,SampleType
 ##' @param patients optional list of PatientIDs to include
 ##' @param cnv.strings variant annotations for CNGs and CNLs. default: c("Gain","Loss")
-##' @param arrange.patients.by optional list of clinical data columns to order patients. default: c("PatientID")
 ##' @param clin.data.cols optional vector of clinical data columns to annotate
 ##' @param ref_sample_type an underscore delim. string indicating the sample type and study visit to use: eg "Preop_Tissue"
 ##' @param mrd_sample_type an underscore delim. string indicating the sample type and study visit to use: eg "Preop_Tissue"
@@ -415,57 +421,69 @@ make_oncoprint_legend <- function(variant_classes, var.colors="random", backgrou
 ##' @param show.top.n optional number of top genes to show.
 ##' @param show.clin.data logical value whether to show clinical annotations at the bottom of the plot. default:c("PatientID")
 ##' @param show.patient.id logical value whether to annotate PatientIDs on the plot. default: TRUE
-##' @param annotation.colors optional list of clinical column labels in dot format, each matched with a named vector of levels to colors (e.g. list(Stage=c("T0"="blue","T1"="red")))
+##' @param clin.annotation.colors optional list of clinical column labels in dot format, each matched with a named vector of levels to colors (e.g. list(Stage=c("T0"="blue","T1"="red")))
 ##' @param make.legend logical value whether to generate a custom legend for the variants in the plot. default: FLASE
 ##' @param var.reduc.set string ("consequence_reduced","MAF_reduced","MAF_standard","random") or a custom named 
 ##' List with entries "variant class"="new variant class",**listed in order of importance. default: "random"
 ##' @param var.colors optional custom dictionary matching variant types with oncoplot colors or string indicating a predefined set of colors
 ##' otherwise randomly selected colors.
 ##' @param alter_fun optinal external alter_fun
+##' @param out.file.name
 ##' @param . . . additional parameters for Oncoprint plotting function: https://jokergoo.github.io/ComplexHeatmap/reference/oncoPrint.html
 ##' 
 ##' @return named list with "oncoprint"=graphing heatmap object and "legend"=legend object.
 ##' \if{html}{\figure{"/man/figures/concordance_oncoprint_example.jpg"}{options: width=100 alt="R logo"}}
 ##' 
-concordance_oncoprint <- function(snv.data=NA, cnv.data=NA, clin.data=NA, df_samples=NA, patients=NA, 
-                                  arrange.patients.by=c("PatientID"), clin.data.cols=c("PatientID"),
+concordance_oncoprint <- function(snv.data=NA, cnv.data=NULL, clin.data=NA, df_samples=NA, patients=NA, 
+                                  clin.data.cols=c("PatientID"),
                                   ref_sample_type=NA, mrd_sample_type=NA, 
                                   var.dict=NA, cnv.strings=c("Gain","Loss"),
-                                  min.samples.mutated=NA, min.patients.mutated=NA,
+                                  min.samples.mutated=NA, min.patients.mutated=NA, sid.format="none",
                                   show.clin.data=FALSE, show.patient.id=TRUE, clin.annotation.colors=list(),
                                   var.reduc.set=NULL, var.colors=NULL, make.legend=FALSE, concord.barplot=TRUE,
-                                  show.top.n=NA, genes=NULL, alter_fun=NA, out.file.name=NA){
-  
+                                  show.top.n=NA, genes=NULL, alter_fun=NULL, out.file.name=NULL){
+  print("Setting params and formatting data . . .")
   ref_sample_type = tolower(ref_sample_type)
   mrd_sample_type = tolower(mrd_sample_type)
-  df_samples = standardize_names(df_samples, input.type="samples")
-  snv.data = standardize_names(snv.data, warn = FALSE)
-  cnv.data = standardize_names(cnv.data, warn = FALSE)
-  if (!(is.na(patients))){
-    df_samples = df_samples %>% filter(PatientID %in% patients)
+  df_samples = standardize_names(df_samples, sid.format=sid.format, input.type="samples")
+  snv.data = standardize_names(snv.data, sid.format=sid.format, warn = FALSE)
+  if (is.null(cnv.data)){
+    cnv.data = data.frame(matrix("NA", nrow = 1, ncol = 8))
+    names(cnv.data) <- c("SampleID.short","SampleType","PatientID","StudyVisit","Type",
+                         "Hugo_Symbol","Variant_Classification","VariantID")
   }
+  cnv.data = standardize_names(cnv.data, sid.format=sid.format, warn = FALSE)
   
-  # filter input data by sampleID
   clin.data = clin.data %>% select(unique(c("PatientID", clin.data.cols))) %>%
     filter(PatientID %in% df_samples$PatientID)
+  stopifnot("PatientID" %in% names(clin.data))
+  stopifnot(all(!(duplicated(clin.data$PatientID))))
+  if (!(is.na(patients))){
+    df_samples = df_samples %>% filter(PatientID %in% patients)
+  }else{
+    patients=clin.data$PatientID[clin.data$PatientID %in% unique(df_samples$PatientID)]
+  }
+  # filter input data by sampleID
   df_samples = df_samples %>% select(PatientID, StudyVisit, SampleType, SampleID.short) %>%
     mutate(across(c("SampleType","StudyVisit"), tolower)) %>%
-    left_join(clin.data, by="PatientID") %>%
     unite(Tumor_Sample_Barcode, c(SampleID.short, PatientID, StudyVisit, SampleType), remove=FALSE) %>% 
-    mutate(across(c("SampleType","StudyVisit"), tolower)) %>%
     mutate("order"=match(PatientID, clin.data$PatientID)) %>% arrange(order)
   stopifnot(all(!(duplicated(df_samples$Tumor_Sample_Barcode))))
+  #print(df_samples)
+  
   # SNVs
-  # format and recode variants
+  print("selecting snvs . . .")
+  #print(snv.data)
   all.snv_selected = snv.data %>% filter(SampleID.short %in% df_samples$SampleID.short,
                                          !grepl("synon", Variant_Classification, ignore.case=T),
                                          !is.na(Variant_Classification))  %>%
     mutate(Variant_Classification=recode.variants(Variant_Classification, var.reduc.set, cnv.strings)) %>%
-    select(-PatientID) 
+    select(-PatientID)
   all.snv_selected = merge.combine(all.snv_selected,
                                    df_samples %>% select(SampleID.short, SampleType, StudyVisit, PatientID),
                                    join.type="left", join.cols.left = "SampleID.short", join.cols.right = "SampleID.short", priority = "right")
   # CNVs
+  print("selecting cnvs . . .")
   all.cnv_selected = cnv.data %>% filter(SampleID.short %in% df_samples$SampleID.short, !is.na(Hugo_Symbol)) %>% 
     mutate(Variant_Classification=recode.variants(Variant_Classification, var.reduc.set, cnv.strings))
   all.cnv_selected = merge.combine(all.cnv_selected,
@@ -473,11 +491,13 @@ concordance_oncoprint <- function(snv.data=NA, cnv.data=NA, clin.data=NA, df_sam
                                    join.type="left", join.cols.left = "SampleID.short", join.cols.right = "SampleID.short", priority = "right")
   
   # set variant colors
+  print("setting colors and symbols . . .")
   variant.classes = unlist(unique(c(all.cnv_selected$Variant_Classification, all.snv_selected$Variant_Classification)))
   variant.classes = variant.classes[variant.classes != "N.A."]
   if (is.null(var.colors)){
     var.colors = set_variant_colors(variant.classes, cnv.strings=cnv.strings, var.colors=var.reduc.set)
   }
+  
   if (any(variant.classes %!in% names(var.colors))){
     print("WARN: these variant classes missing from var.colors.")
     print(data.frame("class"=(variant.classes), "present"=(variant.classes) %in% names(var.colors)))
@@ -494,6 +514,7 @@ concordance_oncoprint <- function(snv.data=NA, cnv.data=NA, clin.data=NA, df_sam
   }
   
   # optionally use colors to make a legend
+  if (is.null(out.file.name)) out.file.name <- glue("./{ref_sample_type}_vs_{mrd_sample_type}_oncoprint_{Sys.Date()}")
   plot.legend=NA
   if (make.legend){
     plot.legend = make_oncoprint_legend(variant_classes = variant.classes[],
@@ -508,6 +529,7 @@ concordance_oncoprint <- function(snv.data=NA, cnv.data=NA, clin.data=NA, df_sam
   
   # use MAFtools to check and filter MAF data. maf format adds N.A. variants for samples w/no variants
   # TODO, maybe make this step optional
+  print("Filtering MAF input . . .")
   all.snv_selected_maf = format_as_MAF(all.snv_selected, df_samples = df_samples, variant.type="snv")
   all.cnv_selected_maf = format_as_MAF(all.cnv_selected, df_samples = df_samples, variant.type="cnv")
   vc_nonsyn = unique(all.snv_selected_maf$Variant_Classification)
@@ -527,9 +549,10 @@ concordance_oncoprint <- function(snv.data=NA, cnv.data=NA, clin.data=NA, df_sam
                                        sample_types=c(ref_sample_type, mrd_sample_type),
                                        cnv.strings=cnv.strings)
   # explicitly order samples by patient
-  df_plot_data = df_plot_data[,match(clin.data$PatientID, colnames(df_plot_data))]
+  df_plot_data = df_plot_data %>% relocate(patients)
   
   # make plot clinical annotations - TODO: test this
+  print("formatting clinical data . . . ")
   df_annot = as.data.frame(clin.data)
   rownames(df_annot) <- seq(1,nrow(df_annot),1)
   if (!(show.clin.data)){
@@ -540,13 +563,17 @@ concordance_oncoprint <- function(snv.data=NA, cnv.data=NA, clin.data=NA, df_sam
     }
   }
   #names(df_annot) <- make.names(names(df_annot))
+  print(df_annot)
+  stopifnot(is.list(clin.annotation.colors))
   clinical_annot = HeatmapAnnotation(df=df_annot, 
                                      col=clin.annotation.colors, # factors not specified will get random colors
                                      annotation_name_side = "left")
   print(clinical_annot)
+  
   # optionally get concordance stats and make barplot annotation
   concord_muts_annot = HeatmapAnnotation(foo = anno_empty(border = FALSE))
   if (concord.barplot){
+    print("concordance_barplot . . .")
     cols = intersect(names(all.snv_selected),names(all.cnv_selected))
     stopifnot(all(c("SampleID.short","VariantID") %in% cols))
     all.vars = rbind(all.snv_selected[,cols], all.cnv_selected[,cols]) %>% filter(!is.na(VariantID))
@@ -569,7 +596,9 @@ concordance_oncoprint <- function(snv.data=NA, cnv.data=NA, clin.data=NA, df_sam
                                                                          height = unit(7, "cm")))
     print(concord_muts_annot)
   }
+  
   # optionally filter the oncoprint genes
+  print("Selecting data for plot . . .")
   # count_samples <- function(cell){ ## TODO filter by n.samples muated
   #   if (cell==""){
   #     return(0)
@@ -583,9 +612,8 @@ concordance_oncoprint <- function(snv.data=NA, cnv.data=NA, clin.data=NA, df_sam
                     mutate("n.patients"= apply(df_plot_data, 1, function(x) sum(x != ""))) %>%
                     arrange(desc(n.patients)) %>% select(-n.patients)
   if (!(is.na(show.top.n))){
-    df_plot_data = df_plot_data[1:show.top.n,]
+    df_plot_data = df_plot_data[1:min(show.top.n,nrow(df_plot_data)),]
   }
-  #row.order = c(1:nrow(df_plot_data))
   if (!is.null(genes)){
     print("Using custom gene list.")
     #add rows for missing genes
@@ -601,8 +629,11 @@ concordance_oncoprint <- function(snv.data=NA, cnv.data=NA, clin.data=NA, df_sam
   
   ### Main plotting function ####
   print("Constructing plot . . .")
-  print(clin.data$PatientID)
-  jpeg(paste0(out.file.name,".jpg"), units="in", height=10, width=10, res=300)
+  #print(clin.data$PatientID)
+  print(df_plot_data)
+  #print(names(df_plot_data))
+  print(patients)
+  jpeg(paste0(out.file.name,".jpg"), units="in", height=10, width=nrow(clin.data)*0.25 + 3, res=300)
   oncoprint <- oncoPrint(df_plot_data, alter_fun = alter_fun,
                          remove_empty_rows = FALSE,
                          row_order = c(1:nrow(df_plot_data)),
@@ -610,7 +641,7 @@ concordance_oncoprint <- function(snv.data=NA, cnv.data=NA, clin.data=NA, df_sam
                          bottom_annotation = clinical_annot,
                          top_annotation = concord_muts_annot,
                          pct_side = "right", row_names_side = "left",
-                         column_order = clin.data$PatientID,
+                         column_order = c(1:length(patients)),
                          show_heatmap_legend=FALSE)
   draw(oncoprint)
   dev.off()

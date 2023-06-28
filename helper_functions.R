@@ -12,7 +12,7 @@ options(stringsAsFactors = FALSE)
 
 ## also useful
 make_names <- function(df, verbose=FALSE){
-  names(df) <- make.names(names(df))
+  names(df) <- trimws(make.names(names(df)))
   if (verbose){
     print(paste(unlist(names(df)), collapse=", "))
   }
@@ -22,19 +22,23 @@ make_names <- function(df, verbose=FALSE){
 ## reduce sample IDs to base id number, remove aliquot and library identifiers
 ##' @param col A dataframe column of SampleIDs
 ##' @param check whether to print out the id conversion for manual checking. default: FALSE
-##' @param remove.suffix whether to remove the _WGS or other suffix from sample names. defaut:FALSE
+##' @param sid.format SampleID.short style c("none","strict","remove.suffix","remove.A01")
 ##' 
 ##' @return a column of shortened SampleIDs 
-make_SIDshort <- function(col, remove.suffix=TRUE, sid.format=""){
+make_SIDshort <- function(col, sid.format="none"){
   stopifnot(is.vector(col))
+  print(glue("SampleID.short format: {sid.format}"))
   if (sid.format=="strict"){
     return(str_sub(col, 1,7))
+  }else if (sid.format=="none"){
+    return(col)
+  }else if (sid.format=="remove.suffix"){
+    return(gsub("A01", "", col))
+  }else if (sid.format=="remove.suffix"){
+    retunr(sapply(str_split(out, "_"),"[",1))
+  }else{
+    stop(glue("Unknown SampleID.short format: {sid.format}"))
   }
-  out = gsub("A01", "", col)
-  if (remove.suffix){
-    out = sapply(str_split(out, "_"),"[",1)
-  }
-  return(out)
 }
 
 ## print warning if any value is.na
@@ -178,12 +182,11 @@ merge.combine <- function(df1, df2, join.type="left", join.cols.left="SampleID.s
 ### standardize column names
 ##' @param data input variant or sample data frame
 ##' @param sid.format optional type of SampleID.short to create using make_SIDshort.  
-##' @param sid.remove.suffix optional whether to remove SampleID suffixes with make_SIDshort.
 ##' @param input.type string indicating type of input data. default: "variants"
 ##' @param warn whether to print warnings when missing columns are filled with NAs. default=TRUE
 ##' 
 ##' @return input data frame with added renamed columns
-standardize_names <- function(data, input.type="variants", sid.format="", sid.remove.suffix=TRUE, warn=T){
+standardize_names <- function(data, input.type="variants", sid.format="none", warn=T){
   stopifnot(input.type %in% c("variants","samples"))
   
   col_dict = list("SampleID.short"=list("SampleID","sampleNames","RequisitionID"),
@@ -200,7 +203,7 @@ standardize_names <- function(data, input.type="variants", sid.format="", sid.re
     col_dict = as.list(c(col_dict, col_dict_variants))
   }
   
-  rename_ <- function(df, col_dict, sid.format, sid.remove.suffix){
+  rename_ <- function(df, col_dict, sid.format){
     for (new_col in names(col_dict)){
       if (new_col %!in% names(df)){
         
@@ -208,9 +211,7 @@ standardize_names <- function(data, input.type="variants", sid.format="", sid.re
           missing = TRUE
           for (old_col in col_dict[[new_col]]){
             if (old_col %in% names(df)){
-              df = df %>% mutate({{new_col}} := as.character(make_SIDshort(df[[old_col]], 
-                                                              sid.format=sid.format, 
-                                                              remove.suffix=sid.remove.suffix)))
+              df = df %>% mutate({{new_col}} := as.character(make_SIDshort(df[[old_col]], sid.format=sid.format)))
               missing = FALSE
               break
             }
@@ -258,7 +259,7 @@ standardize_names <- function(data, input.type="variants", sid.format="", sid.re
   } #end new_cols to create
   return(df)  
   } # end function
-  return(rename_(data, col_dict, sid.format, sid.remove.suffix))
+  return(rename_(data, col_dict, sid.format))
 }
 
 ## generate a list of N random colors using RColorBrewer
@@ -284,9 +285,21 @@ get_random_color_dict <- function(names) {
 ##'@param print.p optional whether to calculate p value and print on the boxplot. default=TRUE
 ##'
 ##'@return ggplot object
-quick_boxplot <- function(df, x, y, facet=NA, colors=NULL, print.p=TRUE, plot.title=""){
-  df = df %>% mutate({{x}} := as.factor(df[[x]]),
-                     {{y}} := as.numeric(as.factor(df[[y]])))
+quick_boxplot <- function(df, x, y, facet=NULL, colors=NULL, 
+                          print.p=TRUE, log.axes=FALSE, plot.title=""){
+  if (!is.null(facet)){
+    df = df %>% select({{x}},{{y}},{{facet}})
+  }else{
+    df = df %>% select({{x}},{{y}})
+  }
+  df[df=="NA"] <- NA
+  df = df[complete.cases(df),]
+  print(glue("Complete cases {y} by {x}: {nrow(df)}"))
+  if (is.null(colors)){
+    colors = get_random_color_dict(df[[x]])
+  }
+  stopifnot(is.factor(df[[x]]))
+  df[[y]] = as.numeric(as.factor(df[[y]]))
   xlevs = levels(df[[x]])
   counts = df %>% group_by(df[x]) %>% summarize(count=n()) 
   counts = counts %>% mutate("legend" = paste0(counts[[x]]," (n=",count,")"),
@@ -299,65 +312,109 @@ quick_boxplot <- function(df, x, y, facet=NA, colors=NULL, print.p=TRUE, plot.ti
     scale_fill_manual(labels=counts$legend, breaks=counts[[x]], values=counts$color) +
     ggtitle(plot.title) +
     theme(text = element_text(size = 20),
-          axis.text.x = element_blank(),
+          #axis.text.x = element_blank(),
           plot.title = element_text(size = 14))
-  if (!is.na(facet)){
+  print("x")
+  get.p.table <- function(df, x, xlevs, y){
+    filt = ifelse(df[[x]] == xlevs[[1]], TRUE, FALSE)
+    lev1_vals = df[[y]][filt]
+    print(glue("{xlevs[1]} mean: {mean(lev1_vals, na.rm=T)}"))
+    not_lev1_vals = df[[y]][!(filt)]
+    print(glue("{xlevs[2:length(xlevs)]} mean: {mean(not_lev1_vals, na.rm=T)}"))
+    res <- wilcox.test(lev1_vals, 
+                       not_lev1_vals, 
+                       exact = FALSE, paired=FALSE)
+    print(res)
+    p = as.character(round(res$p.value, 3))
+    df_p = data.frame(x = xlevs, y=c(NA,NA), label=c("",""))
+    if (max(lev1_vals, na.rm = T) >= max(not_lev1_vals, na.rm = T)){
+      df_p[2,2] <- max(lev1_vals, na.rm = T)
+      df_p[2,"label"] <- paste0("p=",p)
+    }else{
+      df_p[1,2] <- max(not_lev1_vals, na.rm = T)
+      df_p[1,"label"] <- paste0("p=",p)
+    }
+    names(df_p) <- c(x, y, "label") # use strings as labels
+    print(df_p)
+    return(df_p)
+  }
+    
+  if (!is.null(facet)){
+    print("y")
     df = df %>% mutate({{facet}} := as.factor(df[[facet]]))
+    warn_na(df[[facet]], facet)
+    p_dfs = list()
+    facet.levs = levels(df[[facet]])
+    for (t in facet.levs){
+      print(glue("Level: {t}"))
+      df.facet = df %>% filter(eval(parse(text = glue("{facet} == '{t}'"))))
+      df_pi = get.p.table(df.facet, x, xlevs, y)
+      df_pi = df_pi %>% mutate({{facet}} := t)
+      p_dfs[[t]] <- df_pi
+    }
+    print(length(p_dfs))
+    print(p_dfs[1])
+    df_p = do.call(rbind, p_dfs)
+    df_p = data.frame(df_p) 
+    print(df_p)
     g <- g + 
-        facet_wrap(paste("~",facet))
-    }
-    #labs(y="cfDNA tumor fraction (%)", title="", x="") +
-    #scale_fill_manual(name = "Pathologic Stage", labels=c("NMI/OC","MI/NOC"), values=c("darkturquoise","coral1")) +
-  print(sprintf("%s vs %s, unpaired", xlevs[[1]], xlevs[2:length(xlevs)]))
-  if (!is.na(facet)){
-    for (t in levels(df[,facet])){
-      print(t)
-      cond = paste0(facet, "==","'", t,"'")
-      df_ = df %>% filter(eval(parse(text = cond)))
-      filt = ifelse(df_[,x] == xlevs[[1]], TRUE, FALSE)
-      res <- wilcox.test(df_[filt,y], 
-                         df_[!(filt),y], 
-                         exact = FALSE, paired=FALSE)
-      print(res)
-      # TODO optionally print p value on plots for each facet
-      # p = as.character(round(res$p.value, 2))
-      # max_u = max(df[,metric.str], rm.na=T)
-      # print(res)
-      # y = max(max_u,max_p)
-      # p_text <- data.frame("disease.positive.fact" = 1.0, # x text center placement
-      #                      metric.str = c(y,y), # y text placement
-      #                      disease.positive = c(NA,NA), # to match data input df fill 
-      #                      SampleType = factor(c("plasma","urine"),levels = c("plasma","urine"))) # text faceting
-      # names(p_text) <- c("disease.positive.fact", metric.str,"disease.positive","SampleType")
-    }
+      facet_wrap(paste("~",facet)) +
+      geom_text(data=df_p, aes_string(x=x, y=y, group=facet), size=6, 
+                label=df_p$label, fontface="italic")
   }else{
-      filt = ifelse(df[,x] == xlevs[[1]], TRUE, FALSE)
-      df_lev1 = df[filt,y]
-      print(glue("{xlevs[1]} mean: {mean(df_lev1, na.rm=T)}"))
-      df_not_lev1 = df[!(filt),y]
-      print(glue("{xlevs[2:length(xlevs)]} mean: {mean(df_not_lev1, na.rm=T)}"))
-      res <- wilcox.test(df_lev1, 
-                         df_not_lev1, 
-                         exact = FALSE, paired=FALSE)
-      print(res)
-      p = as.character(round(res$p.value, 3))
-      df_p = data.frame(x = xlevs, y=c(NA,NA), label=c("",""))
-      if (max(df_lev1, na.rm = T) >= max(df_not_lev1, na.rm = T)){
-        df_p[2,2] <- max(df_lev1, na.rm = T)
-        df_p[2,"label"] <- paste0("p=",p)
-      }else{
-        df_p[1,2] <- max(df_not_lev1, na.rm = T)
-        df_p[1,"label"] <- paste0("p=",p)
-      }
-      names(df_p) <- c(x, y, "label") # use strings as labels
-      print(df_p)
-
+      df_p = get.p.table(df, x, xlevs, y)
       g <- g + 
         geom_text(data=df_p, aes_string(x=x, y=y), size=6, 
                   label=df_p$label, fontface="italic")
   }
-  return(g)
+  
+  if (log.axes){
+    g <- g + 
+      scale_y_continuous(trans='log2')
+  }
+  show(g)
 }
+
+## quick bar plot
+# bar_plot_ <- function(df, x, y, log.axis=FALSE){
+#   df.mean = summary %>% group_by(CancerStage) %>% 
+#     summarize("Mean.TF"=mean(as.numeric(tumorFraction.mrd)*100000, na.rm=T),
+#               "Mean.mrd.score"=mean(as.numeric(mrd.score)*100, na.rm=T))
+#   gg <- ggplot(df, aes_string(x=x, y=y)) + 
+#     geom_col() + 
+#     theme(text=element_text(size=20))
+#   if (log.axis){
+#     gg <- gg + scale_y_continuous(trans='log2')
+#   }
+#   show(gg)
+# }
+
+## contingency plot
+# stacked_bar_ <- function(df, x = "Pathologic.Response", y="mrd.status", 
+#                          colors=c("steelblue3","indianred"), y.percent=TRUE){
+#   stopifnot(is.factor(df[[x]]))
+#   stopifnot(is.factor(df[[y]]))
+#   xlevs = levels(df[[x]])
+#   ylevs = levels(df[[y]])
+#   n.0 = sum(df$Pathologic.Response==xlevs[1])
+#   n.1 = sum(df$Pathologic.Response==xlevs[2])
+#   names(colors) <- as.character(ylevs)
+#   gg <- ggplot(df) +
+#     geom_bar(aes(x=df[[x]], fill=df[[y]]), position="fill", color="black") +
+#     scale_fill_manual(name = y, values=colors, labels=paste0(ylevs, " (n=", table(df[[y]]), ")")) +
+#     scale_x_discrete(labels=paste0(xlevs, "\n(n=", table(df[[x]]), ")")) +
+#     theme(text = element_text(size = 16))
+#   if (y.percent){
+#     gg <- gg + 
+#       scale_y_continuous(labels = scales::percent) + 
+#       labs(y="Percent of Patients", x=x)
+#   }
+#   show(gg)
+#   # rows response var, cols predictor
+#   tab = table(df[[y]], df[[x]])
+#   print(tab)
+#   fisher.test(as.matrix(tab))
+# }
 
 ## show which reference values are missing from a vector
 check.missing <- function(list.ref, list.test){
