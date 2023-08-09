@@ -32,10 +32,10 @@ make_SIDshort <- function(col, sid.format="none"){
     return(str_sub(col, 1,7))
   }else if (sid.format=="none"){
     return(col)
-  }else if (sid.format=="remove.suffix"){
+  }else if (sid.format=="remove.A01"){
     return(gsub("A01", "", col))
   }else if (sid.format=="remove.suffix"){
-    retunr(sapply(str_split(out, "_"),"[",1))
+    return(sapply(str_split(col, "_"),"[",1))
   }else{
     stop(glue("Unknown SampleID.short format: {sid.format}"))
   }
@@ -285,7 +285,7 @@ get_random_color_dict <- function(names) {
 ##'@param print.p optional whether to calculate p value and print on the boxplot. default=TRUE
 ##'
 ##'@return ggplot object
-quick_boxplot <- function(df, x, y, facet=NULL, colors=NULL, 
+quick_boxplot <- function(df, x, y, facet=NULL, colors=NULL, replace.log.0=NULL,
                           print.p=TRUE, log.axes=FALSE, plot.title=""){
   if (!is.null(facet)){
     df = df %>% select({{x}},{{y}},{{facet}})
@@ -299,28 +299,20 @@ quick_boxplot <- function(df, x, y, facet=NULL, colors=NULL,
     colors = get_random_color_dict(df[[x]])
   }
   stopifnot(is.factor(df[[x]]))
-  df[[y]] = as.numeric(as.factor(df[[y]]))
+  df[[y]] = as.numeric(df[[y]])
   xlevs = levels(df[[x]])
   counts = df %>% group_by(df[x]) %>% summarize(count=n()) 
   counts = counts %>% mutate("legend" = paste0(counts[[x]]," (n=",count,")"),
                               "color"=recode(counts[[x]], !!!colors, .default = NA_character_),
                              across(everything(), as.character))
   print(counts)
-  g <- ggplot(df, aes_string(x=x, y=y, fill=x)) +
-    geom_boxplot(outlier.shape=NA) +
-    geom_point(position=position_jitterdodge(), size=4, pch=1) +
-    scale_fill_manual(labels=counts$legend, breaks=counts[[x]], values=counts$color) +
-    ggtitle(plot.title) +
-    theme(text = element_text(size = 20),
-          #axis.text.x = element_blank(),
-          plot.title = element_text(size = 14))
-  print("x")
+  
   get.p.table <- function(df, x, xlevs, y){
     filt = ifelse(df[[x]] == xlevs[[1]], TRUE, FALSE)
     lev1_vals = df[[y]][filt]
-    print(glue("{xlevs[1]} mean: {mean(lev1_vals, na.rm=T)}"))
+    print(glue("{xlevs[1]} median: {median(lev1_vals, na.rm=T)}"))
     not_lev1_vals = df[[y]][!(filt)]
-    print(glue("{xlevs[2:length(xlevs)]} mean: {mean(not_lev1_vals, na.rm=T)}"))
+    print(glue("{xlevs[2:length(xlevs)]} median: {median(not_lev1_vals, na.rm=T)}"))
     res <- wilcox.test(lev1_vals, 
                        not_lev1_vals, 
                        exact = FALSE, paired=FALSE)
@@ -357,20 +349,39 @@ quick_boxplot <- function(df, x, y, facet=NULL, colors=NULL,
     df_p = do.call(rbind, p_dfs)
     df_p = data.frame(df_p) 
     print(df_p)
+  }else{
+      df_p = get.p.table(df, x, xlevs, y)
+  }
+  
+  if (log.axes){
+    if (is.null(replace.log.0)){
+      df[[y]][df[[y]]==0] <- min(df[[y]])/10
+    }else{
+      df[[y]][df[[y]]==0] <- replace.log.0
+    }
+  }
+  g <- ggplot(df, aes_string(x=x, y=y, fill=x)) +
+    geom_boxplot(outlier.shape=NA) +
+    geom_point(position=position_jitterdodge(), size=4, pch=1) +
+    scale_fill_manual(labels=counts$legend, breaks=counts[[x]], values=counts$color) +
+    ggtitle(plot.title) +
+    theme(text = element_text(size = 20),
+          #axis.text.x = element_blank(),
+          plot.title = element_text(size = 14))
+  if (log.axes){
+    scaleFUN <- function(x) sprintf("%.5f", x)
+    g <- g + 
+      scale_y_continuous(trans='log2', labels=scaleFUN)
+  }
+  if (!is.null(facet)){
     g <- g + 
       facet_wrap(paste("~",facet)) +
       geom_text(data=df_p, aes_string(x=x, y=y, group=facet), size=6, 
                 label=df_p$label, fontface="italic")
   }else{
-      df_p = get.p.table(df, x, xlevs, y)
-      g <- g + 
-        geom_text(data=df_p, aes_string(x=x, y=y), size=6, 
-                  label=df_p$label, fontface="italic")
-  }
-  
-  if (log.axes){
     g <- g + 
-      scale_y_continuous(trans='log2')
+      geom_text(data=df_p, aes_string(x=x, y=y), size=6, 
+                label=df_p$label, fontface="italic")
   }
   show(g)
 }
