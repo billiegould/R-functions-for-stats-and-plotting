@@ -1,6 +1,6 @@
 ## code for finding mutational associations with patient groups, plotting results
 ## B.Gould
-library(tidyverse)
+library(dplyr)
 library(glue)
 library(RColorBrewer)
 library(stats)

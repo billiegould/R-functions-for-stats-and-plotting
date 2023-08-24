@@ -1,6 +1,7 @@
 ### helper functions for post-analysis
 
-library(tidyverse)
+library(dplyr)
+library(stringr)
 library(glue)
 library(RColorBrewer)
 library(stats)

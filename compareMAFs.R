@@ -1,4 +1,4 @@
-library(tidyverse)
+library(tidyr)
 library(glue)
 source("~/Desktop/puffin/R/helper_functions.R")
 
@@ -22,7 +22,7 @@ source("~/Desktop/puffin/R/helper_functions.R")
 ##' @return a named list with: variants = dataframe of variant frequencies, plot =  ggplot object
 compareMAFs <- function(all.snvs=NA, samples=NULL, selectors=NULL, clin.data=NA, fill.na=0.0, text.size=12,
                         color.by="PatientID", log.axes=FALSE, plot=TRUE, plot.title="", colors=NULL,
-                        legend.position="right", plot.file=NA, pt.sz=10, color.by.foreground.value=NA){
+                        legend.position="top", plot.file=NA, pt.sz=10, color.by.foreground.value=NA){
   # WARN: patched variants are often SampleType and StudyVisit==NA
   if (!is.null(samples)){
     counts = samples %>% group_by(PatientID) %>% summarize(counts=n())
@@ -43,9 +43,10 @@ compareMAFs <- function(all.snvs=NA, samples=NULL, selectors=NULL, clin.data=NA,
     left_join(samples, by="SampleID.short") %>%
     mutate(Selector=paste0(StudyVisit,"_",SampleType)) 
   color.by_ = snvs.selected[,color.by]
-  snvs.selected = snvs.selected %>% mutate("Color"=color.by_) %>%
+  snvs.selected = snvs.selected %>% mutate("Color"=as.character(color.by_)) %>%
     select(PatientID, SampleID.short, StudyVisit, SampleType, Hugo_Symbol, 
-           VariantID, VariantFreq, VariantType, Color, Selector)
+           VariantID, VariantFreq, VariantType, Color, Selector) %>%
+    mutate(PatientID=as.character(PatientID))
   if (!(is.null(selectors))){
     print(sprintf("input selectors: %s", selectors))
     df1 = snvs.selected %>% filter(Selector==selectors[[1]])         
@@ -94,7 +95,7 @@ compareMAFs <- function(all.snvs=NA, samples=NULL, selectors=NULL, clin.data=NA,
         shape=Concordant
       )) +
       scale_shape_manual(values = c("TRUE"=19,"FALSE"=17)) +
-      scale_color_manual(name="PatientID", values = colors) +
+      scale_color_manual(name=color.by, values = colors) +
       geom_abline(slope=1, intercept=c(0,0), linetype="dashed") +
       ylim(fill.na, upper.lim) + # set axes equal
       xlim(fill.na, upper.lim) +
