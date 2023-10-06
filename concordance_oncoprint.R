@@ -7,13 +7,13 @@ library(ComplexHeatmap)
 
 
 ##' A function for reclassifying variant annotation strings, to be used with concordance_oncoprint().
-##' @param vt variant type string to replace
+##' @param annotations Consequence or Variant_Class annotations to recode
 ##' @param var.reduc.type string (from c("consequence_reduced", tbd . . .)) specifying a way to reclassify variant annotations, 
 ##' or a custom lsit of lists containing variant terms with the last element the replacement term.
 ##' @param cnv.strings optional terms to use for CNG and CNL. default: c("Gain","Loss") 
 ##' 
 ##' @return return variant string replacement
-recode.variants <- function(variants, var.reduc.set=NULL, cnv.strings=c("Gain","Loss")){
+recode.variants <- function(annotations, var.reduc.set=NULL, cnv.strings=c("Gain","Loss")){
   # TODO: MAF Standard
   #cbioportal convention, from: https://github.com/PoisonAlien/maftools/issues/686
   # vc    vc.cbio
@@ -37,6 +37,7 @@ recode.variants <- function(variants, var.reduc.set=NULL, cnv.strings=c("Gain","
   #     "Multi_hit" = "black")
   
   if (is.null(var.reduc.set)){
+    warning("No variant annotation reduction set specified.")
     return(variants)
   } else if (is.list(var.reduc.set)){
     print("Using custom var.reduc.set.")
@@ -62,7 +63,7 @@ recode.variants <- function(variants, var.reduc.set=NULL, cnv.strings=c("Gain","
     stop("variant recoding not recognized. is it formatted as a list or a str? (var.reduc.set)")
   }
   # replace the variants 
-  recode <- function(vt, var.reduc.code){
+  recode_ <- function(vt, var.reduc.code){
     for (lst in var.reduc.code){
       for (term in lst[1:(length(lst)-1)]){
         if (grepl(term, vt, ignore.case=T)){
@@ -70,7 +71,7 @@ recode.variants <- function(variants, var.reduc.set=NULL, cnv.strings=c("Gain","
           return(vt)}
       }}
     return(vt)}
-  variant_classes_new = lapply(variants, function(x) recode(x, var.reduc.code))
+  variant_classes_new = lapply(annotations, function(x) recode_(x, var.reduc.code))
   if (any(is.na(variant_classes_new))){
     print(unique(variants))
     print(var.reduc.code)
@@ -442,6 +443,7 @@ concordance_oncoprint <- function(snv.data=NA, cnv.data=NULL, clin.data=NA, df_s
                                   show.clin.data=FALSE, show.patient.id=TRUE, clin.annotation.colors=list(),
                                   var.reduc.set=NULL, var.colors=NULL, make.legend=FALSE, concord.barplot=TRUE,
                                   show.top.n=NA, genes=NULL, alter_fun=NULL, out.file.name=NULL){
+
   print("Setting params and formatting data . . .")
   ref_sample_type = tolower(ref_sample_type)
   mrd_sample_type = tolower(mrd_sample_type)
@@ -451,9 +453,14 @@ concordance_oncoprint <- function(snv.data=NA, cnv.data=NULL, clin.data=NA, df_s
     cnv.data = data.frame(matrix("NA", nrow = 1, ncol = 8))
     names(cnv.data) <- c("SampleID.short","SampleType","PatientID","StudyVisit","Type",
                          "Hugo_Symbol","Variant_Classification","VariantID")
+  }else{
+    cnv.data = standardize_names(cnv.data, warn = FALSE)
   }
-  cnv.data = standardize_names(cnv.data, sid.format=sid.format, warn = FALSE)
-  
+  if (!(is.na(patients))){
+    df_samples = df_samples %>% filter(PatientID %in% patients)
+	}
+  # filter input data by Patient
+  stopifnot("PatientID" %in% names(clin.data))
   clin.data = clin.data %>% select(unique(c("PatientID", clin.data.cols))) %>%
     filter(PatientID %in% df_samples$PatientID)
   stopifnot("PatientID" %in% names(clin.data))
@@ -469,20 +476,16 @@ concordance_oncoprint <- function(snv.data=NA, cnv.data=NULL, clin.data=NA, df_s
     unite(Tumor_Sample_Barcode, c(SampleID.short, PatientID, StudyVisit, SampleType), remove=FALSE) %>% 
     mutate("order"=match(PatientID, clin.data$PatientID)) %>% arrange(order)
   stopifnot(all(!(duplicated(df_samples$Tumor_Sample_Barcode))))
-  #print(df_samples)
-  
-  # SNVs
+
   print("selecting snvs . . .")
-  #print(snv.data)
   all.snv_selected = snv.data %>% filter(SampleID.short %in% df_samples$SampleID.short,
                                          !grepl("synon", Variant_Classification, ignore.case=T),
-                                         !is.na(Variant_Classification))  %>%
+                                         !is.na(Variant_Classification)) %>%
     mutate(Variant_Classification=recode.variants(Variant_Classification, var.reduc.set, cnv.strings)) %>%
     select(-PatientID)
   all.snv_selected = merge.combine(all.snv_selected,
-                                   df_samples %>% select(SampleID.short, SampleType, StudyVisit, PatientID),
-                                   join.type="left", join.cols.left = "SampleID.short", join.cols.right = "SampleID.short", priority = "right")
-  # CNVs
+                                   df_samples %>% select(SampleID.short, SampleType, StudyVisit, PatientID))
+
   print("selecting cnvs . . .")
   all.cnv_selected = cnv.data %>% filter(SampleID.short %in% df_samples$SampleID.short, !is.na(Hugo_Symbol)) %>% 
     mutate(Variant_Classification=recode.variants(Variant_Classification, var.reduc.set, cnv.strings))
@@ -629,11 +632,10 @@ concordance_oncoprint <- function(snv.data=NA, cnv.data=NULL, clin.data=NA, df_s
   
   ### Main plotting function ####
   print("Constructing plot . . .")
-  #print(clin.data$PatientID)
-  print(df_plot_data)
-  #print(names(df_plot_data))
-  print(patients)
+
+  if (is.null(out.file.name)) out.file.name <- glue("./{ref_sample_type}_vs_{mrd_sample_type}_oncoprint_{Sys.Date()}")
   jpeg(paste0(out.file.name,".jpg"), units="in", height=10, width=nrow(clin.data)*0.25 + 3, res=300)
+
   oncoprint <- oncoPrint(df_plot_data, alter_fun = alter_fun,
                          remove_empty_rows = FALSE,
                          row_order = c(1:nrow(df_plot_data)),
@@ -645,6 +647,7 @@ concordance_oncoprint <- function(snv.data=NA, cnv.data=NULL, clin.data=NA, df_s
                          show_heatmap_legend=FALSE)
   draw(oncoprint)
   dev.off()
+  print("plot written to file: {out.file.name}.jpg")
   #draw(oncoprint) doesn't work, only pdf output works currently
   #TODO:add kwargs
   # plot_w_kwargs <- function(func, ...) {

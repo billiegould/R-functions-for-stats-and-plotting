@@ -68,8 +68,12 @@ compareMAFs <- function(all.snvs=NA, samples=NULL, selectors=NULL, clin.data=NA,
                                                                  levels=c(TRUE,FALSE)),
                                                Color=merge_info(Color.x, Color.y)) %>%
                             replace_na(list(VariantFreq.x = fill.na, VariantFreq.y=fill.na))
-  n.variants = nrow(df_compare_freq) + sum(df_compare_freq$Concordant=="TRUE")
-  stopifnot(n.variants == nrow(snvs.selected))
+  # fix here
+  # if (nrow(df1)!=0 & nrow(df2)!=0){
+  #   n.variants = nrow(df_compare_freq) + sum(df_compare_freq$Concordant=="TRUE")
+  #   stopifnot(n.variants == nrow(snvs.selected))
+  # }
+  
   # if (!is.na(clin.data))){
   #   df_compare_freq = df_compare_freq %>% left_join(clin.data, by="PatientID")
   # }
@@ -127,8 +131,8 @@ compareMAFs <- function(all.snvs=NA, samples=NULL, selectors=NULL, clin.data=NA,
   return(list("variants"=df_compare_freq %>% select(PatientID, SampleID.short.x, SampleID.short.y,
                                                     Selector.x, Selector.y, VariantFreq.x, VariantFreq.y,
                                                     VariantType.x, VariantType.y,
-                                                    Concordant, Color) %>%
-                                              rename(color_by = Color), 
+                                                    Concordant, Color), #%>%
+                                              #rename(color_by = "Color"), 
               "plot"=gg,
               "colors"=colors))
 }

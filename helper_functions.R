@@ -66,8 +66,8 @@ warn_na <- function(my.vector, my.vector.name=NA){
 }
 
 ### fill in col NAs with 0s at indexes where values in another column are 0
-fill_na_0 <- function(col, index_col){
-  col[index_col==0] <- 0.0
+fill_na_0 <- function(col, index_col, fill.val=0.0){
+  col[index_col==0] <- fill.val
   return(col)
 }
 
@@ -116,7 +116,7 @@ merge_info <- function(colA, colB, priority="left", col_name="merge", warn=T){
     out_col = ifelse((is.na(colA) | (colA=="") | is.null(colA)), colB, colA)
   }else if (priority=="right"){
     # use col B unless blank, then use A
-    out_col = ifelse((is.na(colB) | (colB=="")| is.null(colB)), colA, colB)
+    out_col = ifelse((is.na(colB) | (colB=="") | is.null(colB)), colA, colB)
   }
   if (any(is.na(out_col)) & warn){
     print("merge_info::")
@@ -161,6 +161,9 @@ merge.combine <- function(df1, df2, join.type="left", join.cols.left="SampleID.s
   if (length(comm_cols)==0){
     print("WARN: no columns in common")
     return(df.merge)
+  }else if (warn){
+    print("Merging columns:")
+    print(comm_cols)
   }
   df.merge = join_(df1, df2, join.type, join.cols.left, join.cols.right)
   for (col_str in comm_cols){
@@ -276,6 +279,35 @@ get_random_color_dict <- function(names) {
   return(colors)
 }
 
+## get p values for plottling
+get.p.table.mwu <- function(df, x, xlevs, y){
+  filt = ifelse(df[[x]] == xlevs[[1]], TRUE, FALSE)
+  lev1_vals = df[[y]][filt]
+  print(glue("{xlevs[1]} median: {median(lev1_vals, na.rm=T)}"))
+  not_lev1_vals = df[[y]][!(filt)]
+  print(glue("{xlevs[2:length(xlevs)]} median: {median(not_lev1_vals, na.rm=T)}"))
+  res <- wilcox.test(lev1_vals, 
+                     not_lev1_vals, 
+                     exact = FALSE, paired=FALSE)
+  print(res)
+  if (res$p.value < 0.001){
+    p = "<0.001"
+  }else{
+    p = as.character(round(res$p.value, 3))
+  }
+  df_p = data.frame(x = xlevs, y=c(NA,NA), label=c("",""))
+  if (max(lev1_vals, na.rm = T) >= max(not_lev1_vals, na.rm = T)){
+    df_p[2,2] <- max(lev1_vals, na.rm = T)
+    df_p[2,"label"] <- paste0("p=",p)
+  }else{
+    df_p[1,2] <- max(not_lev1_vals, na.rm = T)
+    df_p[1,"label"] <- paste0("p=",p)
+  }
+  names(df_p) <- c(x, y, "label") # use strings as labels
+  print(df_p)
+  return(df_p)
+}
+
 
 ## make a quick boxplot using one categorical predictor and one continuous repsonse and output MWU test
 ##'@param df data frame containing all inputs
@@ -286,8 +318,8 @@ get_random_color_dict <- function(names) {
 ##'@param print.p optional whether to calculate p value and print on the boxplot. default=TRUE
 ##'
 ##'@return ggplot object
-quick_boxplot <- function(df, x, y, facet=NULL, colors=NULL, replace.log.0=NULL,
-                          print.p=TRUE, log.axes=FALSE, plot.title=""){
+quick_boxplot <- function(df, x, y, facet=NULL, colors=NULL, log.0.adj=NULL,
+                          print.p=TRUE, log.axes=FALSE, hline=NULL, plot.title=""){
   if (!is.null(facet)){
     df = df %>% select({{x}},{{y}},{{facet}})
   }else{
@@ -307,31 +339,6 @@ quick_boxplot <- function(df, x, y, facet=NULL, colors=NULL, replace.log.0=NULL,
                               "color"=recode(counts[[x]], !!!colors, .default = NA_character_),
                              across(everything(), as.character))
   print(counts)
-  
-  get.p.table <- function(df, x, xlevs, y){
-    filt = ifelse(df[[x]] == xlevs[[1]], TRUE, FALSE)
-    lev1_vals = df[[y]][filt]
-    print(glue("{xlevs[1]} median: {median(lev1_vals, na.rm=T)}"))
-    not_lev1_vals = df[[y]][!(filt)]
-    print(glue("{xlevs[2:length(xlevs)]} median: {median(not_lev1_vals, na.rm=T)}"))
-    res <- wilcox.test(lev1_vals, 
-                       not_lev1_vals, 
-                       exact = FALSE, paired=FALSE)
-    print(res)
-    p = as.character(round(res$p.value, 3))
-    df_p = data.frame(x = xlevs, y=c(NA,NA), label=c("",""))
-    if (max(lev1_vals, na.rm = T) >= max(not_lev1_vals, na.rm = T)){
-      df_p[2,2] <- max(lev1_vals, na.rm = T)
-      df_p[2,"label"] <- paste0("p=",p)
-    }else{
-      df_p[1,2] <- max(not_lev1_vals, na.rm = T)
-      df_p[1,"label"] <- paste0("p=",p)
-    }
-    names(df_p) <- c(x, y, "label") # use strings as labels
-    print(df_p)
-    return(df_p)
-  }
-    
   if (!is.null(facet)){
     print("y")
     df = df %>% mutate({{facet}} := as.factor(df[[facet]]))
@@ -341,7 +348,7 @@ quick_boxplot <- function(df, x, y, facet=NULL, colors=NULL, replace.log.0=NULL,
     for (t in facet.levs){
       print(glue("Level: {t}"))
       df.facet = df %>% filter(eval(parse(text = glue("{facet} == '{t}'"))))
-      df_pi = get.p.table(df.facet, x, xlevs, y)
+      df_pi = get.p.table.mwu(df.facet, x, xlevs, y)
       df_pi = df_pi %>% mutate({{facet}} := t)
       p_dfs[[t]] <- df_pi
     }
@@ -351,14 +358,15 @@ quick_boxplot <- function(df, x, y, facet=NULL, colors=NULL, replace.log.0=NULL,
     df_p = data.frame(df_p) 
     print(df_p)
   }else{
-      df_p = get.p.table(df, x, xlevs, y)
+      df_p = get.p.table.mwu(df, x, xlevs, y)
   }
   
+  # for plotting only
   if (log.axes){
-    if (is.null(replace.log.0)){
-      df[[y]][df[[y]]==0] <- min(df[[y]])/10
+    if (any(df[[y]]==0)){
+      df[[y]] = df[[y]] + log.0.adj
     }else{
-      df[[y]][df[[y]]==0] <- replace.log.0
+      df[[y]][df[[y]]==0] <- min(df[[y]])/10
     }
   }
   g <- ggplot(df, aes_string(x=x, y=y, fill=x)) +
@@ -374,6 +382,9 @@ quick_boxplot <- function(df, x, y, facet=NULL, colors=NULL, replace.log.0=NULL,
     g <- g + 
       scale_y_continuous(trans='log2', labels=scaleFUN)
   }
+  if (!is.null(hline)){
+    g <- g + geom_hline(aes(yintercept=hline), linetype="dashed", color="grey", size=1)
+  }
   if (!is.null(facet)){
     g <- g + 
       facet_wrap(paste("~",facet)) +
@@ -384,49 +395,127 @@ quick_boxplot <- function(df, x, y, facet=NULL, colors=NULL, replace.log.0=NULL,
       geom_text(data=df_p, aes_string(x=x, y=y), size=6, 
                 label=df_p$label, fontface="italic")
   }
-  show(g)
+  #show(g)
+  return(g)
 }
 
-## quick bar plot
-# bar_plot_ <- function(df, x, y, log.axis=FALSE){
-#   df.mean = summary %>% group_by(CancerStage) %>% 
-#     summarize("Mean.TF"=mean(as.numeric(tumorFraction.mrd)*100000, na.rm=T),
-#               "Mean.mrd.score"=mean(as.numeric(mrd.score)*100, na.rm=T))
-#   gg <- ggplot(df, aes_string(x=x, y=y)) + 
-#     geom_col() + 
-#     theme(text=element_text(size=20))
-#   if (log.axis){
-#     gg <- gg + scale_y_continuous(trans='log2')
-#   }
+## paired boxplot
+# pre_post_plot <- function(df, stat, outcome, colors){
+#   print(stat)
+#   formula = as.formula(paste0(stat,"~ StudyVisit"))
+#   res <- wilcox.test(formula, data = df, exact = FALSE, paired=TRUE)
+#   print(res)
+#   
+#   df_plot = df[,c("StudyVisit","PatientID", stat, outcome)]
+#   df_plot = df_plot %>% rename("stat" = {{stat}}) %>%
+#     mutate("StudyVisit" = factor(StudyVisit, levels=c("Pre-NAC","Post-NAC"))) %>% 
+#     group_by(PatientID) %>% 
+#     mutate(direction=ifelse((stat[StudyVisit=="Pre-NAC"]-stat[StudyVisit=="Post-NAC"])>0,"decrease",
+#                             ifelse((stat[StudyVisit=="Pre-NAC"]-stat[StudyVisit=="Post-NAC"])<0,"increase", "neutral")),
+#            pre.post.pct.diff = (stat[StudyVisit=="Pre-NAC"]-stat[StudyVisit=="Post-NAC"])/mean(stat))
+#   print(df_plot)  
+#   
+#   gg <- ggplot(df_plot, aes_string(x="StudyVisit", y="stat")) + 
+#     geom_boxplot(outlier.shape=NA) + 
+#     #scale_x_discrete("StudyVisit", labels = c("Pre-NAC","Post-NAC")) + 
+#     geom_point(size=4, pch=1) +
+#     geom_line(aes(group = PatientID, colour = direction), linetype = 1) +
+#     scale_color_manual(values=c("increase"="red","decrease"="blue","neutral"="grey")) +
+#     scale_y_continuous(trans='log2') + 
+#     #scale_fill_manual(values=c("red","blue")) +
+#     facet_grid(glue(". ~ {outcome}")) +
+#     labs(y=stat, title=stat) + 
+#     theme(text = element_text(size = 20),
+#           strip.text = element_text(size=20),
+#           axis.ticks = element_blank(), 
+#           #axis.text.x = element_blank(),
+#           legend.position="right")
 #   show(gg)
 # }
 
 ## contingency plot
-# stacked_bar_ <- function(df, x = "Pathologic.Response", y="mrd.status", 
-#                          colors=c("steelblue3","indianred"), y.percent=TRUE){
-#   stopifnot(is.factor(df[[x]]))
-#   stopifnot(is.factor(df[[y]]))
-#   xlevs = levels(df[[x]])
-#   ylevs = levels(df[[y]])
-#   n.0 = sum(df$Pathologic.Response==xlevs[1])
-#   n.1 = sum(df$Pathologic.Response==xlevs[2])
-#   names(colors) <- as.character(ylevs)
-#   gg <- ggplot(df) +
-#     geom_bar(aes(x=df[[x]], fill=df[[y]]), position="fill", color="black") +
-#     scale_fill_manual(name = y, values=colors, labels=paste0(ylevs, " (n=", table(df[[y]]), ")")) +
-#     scale_x_discrete(labels=paste0(xlevs, "\n(n=", table(df[[x]]), ")")) +
-#     theme(text = element_text(size = 16))
-#   if (y.percent){
-#     gg <- gg + 
-#       scale_y_continuous(labels = scales::percent) + 
-#       labs(y="Percent of Patients", x=x)
-#   }
-#   show(gg)
-#   # rows response var, cols predictor
-#   tab = table(df[[y]], df[[x]])
-#   print(tab)
-#   fisher.test(as.matrix(tab))
-# }
+contingency_plot <- function(df, x = NULL, y=NULL, 
+                             colors=c("FALSE"="steelblue3","TRUE"="indianred"), 
+                             y.percent=TRUE, facet=NULL){
+  df$X = factor(df[[x]])
+  df$Y = factor(df[[y]])
+  warn_na(df$X)
+  warn_na(df$Y)
+  xlevs = levels(df$X)
+  ylevs = levels(df$Y)
+  n.0 = sum(df$X==xlevs[1])
+  n.1 = sum(df$X==xlevs[2])
+  if (length(colors) != length(ylevs)){
+    colors = get_random_color_dict(names = ylevs)
+  }
+  # for plotting only
+  # if (log.axes){
+  #   if (any(df[[y]]==0)){
+  #     df[[y]] = df[[y]] + log.0.adj
+  #   }else{
+  #     df[[y]][df[[y]]==0] <- min(df[[y]])/10
+  #   }
+  # }
+  gg <- ggplot(df) +
+    geom_bar(aes(x=Y, fill=X), position="fill", color="black") +
+    scale_fill_manual(name = y, values=colors, labels=paste0(ylevs, " (n=", table(df$Y), ")")) +
+    scale_x_discrete(labels=paste0(xlevs, "\n(n=", table(df$X), ")")) +
+    theme(text = element_text(size = 16))
+  if (y.percent){
+    gg <- gg +
+      scale_y_continuous(labels = scales::percent) +
+      labs(y="Percent of Patients", x=x)
+  }
+  print(y)
+  
+  if (!is.null(facet)){
+    xlevs = levels(df$X)
+    ylevs = levels(df$Y)
+    n.0 = sum(df$X==xlevs[1])
+    n.1 = sum(df$X==xlevs[2])
+    
+    gg <- gg + scale_x_discrete(labels=paste0(xlevs)) +
+      facet_wrap(paste("~",facet)) +
+      geom_text(data=df_p, aes_string(x=x, y=y, group=facet), size=6, 
+                                      label=df_p$label, fontface="italic")
+    # print p-values per facet
+    df = df %>% mutate({{facet}} := as.factor(df[[facet]]))
+    warn_na(df[[facet]], facet)
+    p_dfs = list()
+    facet.levs = levels(df[[facet]])
+    for (t in facet.levs){
+      print(glue("Level: {t}"))
+      df.facet = df %>% filter(eval(parse(text = glue("{facet} == '{t}'"))))
+      # rows response var, cols predictor
+      tab = table(df.facet$Y, df.facet$X)
+      print(tab)
+      res = fisher.test(as.matrix(tab))
+      print(res)
+      if (res$p.value < 0.001){
+        p = "<0.001"
+      }else{
+        p = as.character(round(res$p.value, 3))
+      }
+      df_p = data.frame(x = facet.levs, y=rep(NA, length(facet.levs)), label=rep("",length(facet.levs)))
+      #if (max(lev1_vals, na.rm = T) >= max(not_lev1_vals, na.rm = T)){
+      df_p[2,2] <- 0.1 #max(lev1_vals, na.rm = T)
+      df_p[2,"label"] <- paste0("p=",p)
+      # }else{
+      #   df_p[1,2] <- max(not_lev1_vals, na.rm = T)
+      #   df_p[1,"label"] <- paste0("p=",p)
+      # }
+      names(df_p) <- c(x, y, "label") # use strings as labels
+      print(df_p)
+    }
+  }else{
+    tab = table(df$Y, df$X)
+    print(tab)
+    res = fisher.test(as.matrix(tab))
+    print(res)
+  }
+  show(gg)
+  return(gg)
+}
 
 ## show which reference values are missing from a vector
 check.missing <- function(list.ref, list.test){
