@@ -5,6 +5,7 @@ library(stringr)
 library(glue)
 library(RColorBrewer)
 library(stats)
+library(ggsignif)
 
 options(stringsAsFactors = FALSE)
 
@@ -290,10 +291,10 @@ get.p.table.mwu <- function(df, x, xlevs, y){
                      not_lev1_vals, 
                      exact = FALSE, paired=FALSE)
   print(res)
-  if (res$p.value < 0.001){
-    p = "<0.001"
+  if (res$p.value < 0.0001){
+    p = "<0.0001"
   }else{
-    p = as.character(round(res$p.value, 3))
+    p = as.character(round(res$p.value, 4))
   }
   df_p = data.frame(x = xlevs, y=c(NA,NA), label=c("",""))
   if (max(lev1_vals, na.rm = T) >= max(not_lev1_vals, na.rm = T)){
@@ -319,46 +320,85 @@ get.p.table.mwu <- function(df, x, xlevs, y){
 ##'
 ##'@return ggplot object
 quick_boxplot <- function(df, x, y, facet=NULL, colors=NULL, log.0.adj=NULL,
-                          print.p=TRUE, log.axes=FALSE, hline=NULL, plot.title=""){
-  if (!is.null(facet)){
-    df = df %>% select({{x}},{{y}},{{facet}})
-  }else{
-    df = df %>% select({{x}},{{y}})
-  }
+                          print.p=TRUE, log.axes=FALSE, hline=NULL, plot.title="",
+                          label.col=NULL){
+  cols = c(x, y, facet, label.col)
+  stopifnot(all(cols[!is.null(cols)] %in% names(df)))
+  df = df[,cols[!is.null(cols)]]
   df[df=="NA"] <- NA
+  print(df)
   df = df[complete.cases(df),]
   print(glue("Complete cases {y} by {x}: {nrow(df)}"))
+  
   if (is.null(colors)){
     colors = get_random_color_dict(df[[x]])
   }
   stopifnot(is.factor(df[[x]]))
   df[[y]] = as.numeric(df[[y]])
   xlevs = levels(df[[x]])
+  print(xlevs)
   counts = df %>% group_by(df[x]) %>% summarize(count=n()) 
-  counts = counts %>% mutate("legend" = paste0(counts[[x]]," (n=",count,")"),
+  counts = data.frame(counts %>% mutate("legend" = paste0(counts[[x]]," (n=",count,")"),
                               "color"=recode(counts[[x]], !!!colors, .default = NA_character_),
-                             across(everything(), as.character))
+                             across(everything(), as.character)))
+  rownames(counts) <- counts[[x]]
+  counts = counts[xlevs, ]
   print(counts)
+  
+  g <- ggplot(df, aes_string(x=x, y=y, fill=x, group=x))
+  
   if (!is.null(facet)){
     print("y")
     df = df %>% mutate({{facet}} := as.factor(df[[facet]]))
+    print(df)
     warn_na(df[[facet]], facet)
     p_dfs = list()
     facet.levs = levels(df[[facet]])
-    for (t in facet.levs){
-      print(glue("Level: {t}"))
-      df.facet = df %>% filter(eval(parse(text = glue("{facet} == '{t}'"))))
-      df_pi = get.p.table.mwu(df.facet, x, xlevs, y)
-      df_pi = df_pi %>% mutate({{facet}} := t)
-      p_dfs[[t]] <- df_pi
+    
+    if (length(levels(df[[x]])) > 2) {
+      #TODO: 
+      # comparisons = combn(levels(df.facet[[x]]),
+      #                     2, simplify = F)
+      # print(comparisons)
+      # g <- g +
+      #   geom_signif(test="wilcox.test", comparisons = comparisons,
+      #               step_increase = 0.2, map_signif_level = TRUE, textsize = 7)
+      print("todo: multi comparison P-val across facets")
+    }else{
+      for (t in facet.levs){
+          df.facet = df %>% filter(eval(parse(text = glue("{facet} == '{t}'"))))
+          print(df.facet)
+          df_pi = get.p.table.mwu(df.facet, x, xlevs, y)
+          df_pi = df_pi %>% mutate({{facet}} := t)
+          p_dfs[[t]] <- df_pi
+        }
+        print(length(p_dfs))
+        print(p_dfs[1])
+        df_p = do.call(rbind, p_dfs)
+        df_p = data.frame(df_p) 
+        print(df_p)
+        g <- g + 
+          facet_wrap(paste("~",facet)) +
+          geom_text(data=df_p, aes(x=.data[[x]], y=.data[[y]], group=.data[[facet]]), size=6, 
+                    label=df_p[["label"]], fontface="italic")
     }
-    print(length(p_dfs))
-    print(p_dfs[1])
-    df_p = do.call(rbind, p_dfs)
-    df_p = data.frame(df_p) 
-    print(df_p)
-  }else{
+    
+  }else{ #is.na(facet)
+    if (length(levels(df[[x]])) > 2){
+      comparisons = combn(levels(df[[x]]),
+                          2, simplify = F)
+      print(comparisons)
+      g <- g +
+        geom_signif(test="wilcox.test", comparisons = comparisons[c(3,5)],
+                    step_increase = 0.2, map_signif_level = TRUE, textsize = 7)
+    }else{
       df_p = get.p.table.mwu(df, x, xlevs, y)
+      g <- g + 
+        geom_text(data=df_p, aes(x=.data[[x]], y=.data[[y]]), size=6, 
+                  label=df_p$label, fontface="italic") #+
+      # todo: get these labels to match plotting order
+        #scale_x_discrete(labels=paste0(counts[[x]], "\n(n=", counts[["count"]],")"))
+    }
   }
   
   # for plotting only
@@ -369,7 +409,7 @@ quick_boxplot <- function(df, x, y, facet=NULL, colors=NULL, log.0.adj=NULL,
       df[[y]][df[[y]]==0] <- min(df[[y]])/10
     }
   }
-  g <- ggplot(df, aes_string(x=x, y=y, fill=x)) +
+  g <- g +
     geom_boxplot(outlier.shape=NA) +
     geom_point(position=position_jitterdodge(), size=4, pch=1) +
     scale_fill_manual(labels=counts$legend, breaks=counts[[x]], values=counts$color) +
@@ -385,46 +425,55 @@ quick_boxplot <- function(df, x, y, facet=NULL, colors=NULL, log.0.adj=NULL,
   if (!is.null(hline)){
     g <- g + geom_hline(aes(yintercept=hline), linetype="dashed", color="grey", size=1)
   }
-  if (!is.null(facet)){
-    g <- g + 
-      facet_wrap(paste("~",facet)) +
-      geom_text(data=df_p, aes_string(x=x, y=y, group=facet), size=6, 
-                label=df_p$label, fontface="italic")
-  }else{
-    g <- g + 
-      geom_text(data=df_p, aes_string(x=x, y=y), size=6, 
-                label=df_p$label, fontface="italic")
+  if (!is.null(label.col)){
+    g <- g + geom_text(aes(label=.data[[label.col]]), check_overlap = FALSE, position=position_jitter(),size=5)
   }
   #show(g)
   return(g)
 }
 
-## paired boxplot
-# pre_post_plot <- function(df, stat, outcome, colors){
-#   print(stat)
-#   formula = as.formula(paste0(stat,"~ StudyVisit"))
+# boxplot with lines: pre-nac vs post nac samples, outline points by recur vs. non-recur
+# pre_post_plot <- function(df, y, x, x.colors=NULL, line.group.var = "direction", 
+#                           line.colors=c("increase"="red","decrease"="blue"), facet=NULL){
+#   print(y)
+#   stopifnot(is.factor(df[[x]]))
+#   
+#   if (is.null(x.colors)){
+#     xlevs = levels(df[[x]])
+#     x.colors = rep("white", length(xlevs))
+#     names(x.colors) <- xlevs
+#   }
+#   
+#   formula = as.formula(paste0(y,"~ StudyVisit"))
 #   res <- wilcox.test(formula, data = df, exact = FALSE, paired=TRUE)
 #   print(res)
 #   
-#   df_plot = df[,c("StudyVisit","PatientID", stat, outcome)]
-#   df_plot = df_plot %>% rename("stat" = {{stat}}) %>%
-#     mutate("StudyVisit" = factor(StudyVisit, levels=c("Pre-NAC","Post-NAC"))) %>% 
-#     group_by(PatientID) %>% 
-#     mutate(direction=ifelse((stat[StudyVisit=="Pre-NAC"]-stat[StudyVisit=="Post-NAC"])>0,"decrease",
-#                             ifelse((stat[StudyVisit=="Pre-NAC"]-stat[StudyVisit=="Post-NAC"])<0,"increase", "neutral")),
-#            pre.post.pct.diff = (stat[StudyVisit=="Pre-NAC"]-stat[StudyVisit=="Post-NAC"])/mean(stat))
-#   print(df_plot)  
+#   if (line.group.var=="direction"){
+#     df_plot = df[,unique(c(facet, y, x, "PatientID"))]
+#   }else{
+#     df_plot = df[,unique(c(facet, y, x, line.group.var, "PatientID"))]
+#   }
 #   
-#   gg <- ggplot(df_plot, aes_string(x="StudyVisit", y="stat")) + 
+#   df_plot = df_plot %>% mutate("stat" = df_plot[[y]], "group"=df_plot[[x]]) %>% 
+#     #arrange(PatientID, {{x}}) %>% # post, pre, alphabetical
+#     group_by(PatientID) %>% 
+#     mutate(diff = (stat[group=="Post-NAC"]-stat[group=="Pre-NAC"]), #/mean(stat),  
+#            direction=ifelse((diff < 0),"decrease","increase")
+#     ) %>% ungroup()
+#   print(df_plot %>% arrange(PatientID, {{x}}) %>% relocate(diff, direction, stat), n=100)
+#   
+#   gg <- ggplot(df_plot, aes_string(x=x, y=y)) + 
 #     geom_boxplot(outlier.shape=NA) + 
-#     #scale_x_discrete("StudyVisit", labels = c("Pre-NAC","Post-NAC")) + 
+#     #scale_fill_manual(x, values=x.colors) + #TODO fix this
+#     #scale_x_discrete(x, colors=x.colors) + 
 #     geom_point(size=4, pch=1) +
-#     geom_line(aes(group = PatientID, colour = direction), linetype = 1) +
-#     scale_color_manual(values=c("increase"="red","decrease"="blue","neutral"="grey")) +
+#     
+#     geom_line(aes_string(group="PatientID", colour = line.group.var), linetype = 1) +
+#     scale_color_manual(values=line.colors) +
 #     scale_y_continuous(trans='log2') + 
-#     #scale_fill_manual(values=c("red","blue")) +
-#     facet_grid(glue(". ~ {outcome}")) +
-#     labs(y=stat, title=stat) + 
+#     
+#     facet_wrap(paste("~", facet)) +
+#     labs(y=y, title=y) + 
 #     theme(text = element_text(size = 20),
 #           strip.text = element_text(size=20),
 #           axis.ticks = element_blank(), 
@@ -436,7 +485,7 @@ quick_boxplot <- function(df, x, y, facet=NULL, colors=NULL, log.0.adj=NULL,
 ## contingency plot
 contingency_plot <- function(df, x = NULL, y=NULL, 
                              colors=c("FALSE"="steelblue3","TRUE"="indianred"), 
-                             y.percent=TRUE, facet=NULL){
+                             y.percent=TRUE, facet=NULL, title=""){
   df$X = factor(df[[x]])
   df$Y = factor(df[[y]])
   warn_na(df$X)
@@ -448,27 +497,21 @@ contingency_plot <- function(df, x = NULL, y=NULL,
   if (length(colors) != length(ylevs)){
     colors = get_random_color_dict(names = ylevs)
   }
-  # for plotting only
-  # if (log.axes){
-  #   if (any(df[[y]]==0)){
-  #     df[[y]] = df[[y]] + log.0.adj
-  #   }else{
-  #     df[[y]][df[[y]]==0] <- min(df[[y]])/10
-  #   }
-  # }
   gg <- ggplot(df) +
-    geom_bar(aes(x=Y, fill=X), position="fill", color="black") +
+    geom_bar(aes(x=X, fill=Y), position="fill", color="black") +
     scale_fill_manual(name = y, values=colors, labels=paste0(ylevs, " (n=", table(df$Y), ")")) +
-    scale_x_discrete(labels=paste0(xlevs, "\n(n=", table(df$X), ")")) +
-    theme(text = element_text(size = 16))
+    scale_x_discrete(name=x, labels=paste0(xlevs, "\n(n=", table(df$X), ")")) +
+    theme(text = element_text(size = 16)) +
+    ggtitle(title)
   if (y.percent){
     gg <- gg +
       scale_y_continuous(labels = scales::percent) +
       labs(y="Percent of Patients", x=x)
   }
-  print(y)
   
   if (!is.null(facet)){
+    ## fix this code
+    stop("no facet support yet")
     xlevs = levels(df$X)
     ylevs = levels(df$Y)
     n.0 = sum(df$X==xlevs[1])
@@ -513,7 +556,7 @@ contingency_plot <- function(df, x = NULL, y=NULL,
     res = fisher.test(as.matrix(tab))
     print(res)
   }
-  show(gg)
+  #show(gg)
   return(gg)
 }
 
@@ -527,4 +570,45 @@ check.missing <- function(list.ref, list.test){
     print(list.all)
     print(data.frame("level"=list.all, "in.test.list"=list.all %in% list.test, "in.ref.list"=list.all %in% list.ref))
   }
+}
+
+
+##### Get optimal and target sens and spec for a data set, optionally print ROC curve.
+#####
+get_sens_spec <- function(df, label_col, score_col, title=NA, thresh=NA, target_sens=NA,
+                          text.cex = 2, print.thres="best"){
+  library(pROC)
+  print(label_col %in% names(df))
+  print(score_col %in% names(df))
+  print(sum(!is.na(df[[score_col]])))
+  df = df %>% rename("label"={{label_col}}, "score"={{score_col}}) %>% mutate("label"=as.character(label))
+  print(glue("number of NA labels: {sum(is.na(df$label))}"))
+  print(sprintf("case/control: %s / %s", sum(df$label=="TRUE"), sum(df$label=="FALSE")))
+  
+  if (!is.na(thresh)){
+    TP = nrow(df %>% filter(label=="TRUE", score >= thresh))
+    FN = nrow(df %>% filter(label=="TRUE", score < thresh))
+    TN = nrow(df %>% filter(label=="FALSE", score < thresh))
+    FP = nrow(df %>% filter(label=="FALSE", score >= thresh))
+    sens = TP/(TP + FN)
+    spec = TN/(TN + FP)
+    print(paste("Threshold Sens:", sens))
+    print(paste("Threshold Spec:", spec))
+  }
+  
+  pROC_obj <- roc_(data=df, response="label", predictor="score", 
+                   smooth = FALSE, plot=FALSE, direction="<") # controls score lower than cases
+  if (!is.na(title)){
+    plot.roc(pROC_obj, auc.polygon=TRUE, max.auc.polygon=FALSE, grid=TRUE, 
+             #ci = TRUE, ci.type = "bars", #ci.type=c("bars", "shape", "no")
+             print.auc=TRUE, print.thres=print.thres, main=title, asp = NA, print.auc.cex=text.cex)
+  }
+  print(coords(pROC_obj, x="best"))
+  
+  if (!is.na(target_sens)){
+    print(sprintf("target sens %s", target_sens))
+    print(coords(pROC_obj, x=target_sens, input="sensitivity", 
+                 ret=c("threshold","specificity", "sensitivity")))
+  }
+  print(paste0("AUC: ", auc(pROC_obj)))
 }
