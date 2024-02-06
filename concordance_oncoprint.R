@@ -14,6 +14,7 @@ library(ComplexHeatmap)
 ##' 
 ##' @return return variant string replacement
 recode.variants <- function(annotations, var.reduc.set=NULL, cnv.strings=c("Gain","Loss")){
+  annotations <- as.character(annotations)
   # TODO: MAF Standard
   #cbioportal convention, from: https://github.com/PoisonAlien/maftools/issues/686
   # vc    vc.cbio
@@ -38,7 +39,7 @@ recode.variants <- function(annotations, var.reduc.set=NULL, cnv.strings=c("Gain
   
   if (is.null(var.reduc.set)){
     warning("No variant annotation reduction set specified.")
-    return(variants)
+    return(annotations)
   } else if (is.list(var.reduc.set)){
     print("Using custom var.reduc.set.")
     var.reduc.code = var.reduc.set
@@ -55,28 +56,36 @@ recode.variants <- function(annotations, var.reduc.set=NULL, cnv.strings=c("Gain
                           c('inframe','In_Frame',"In_Frame"),
                           c("missense","protein_altering_variant","Missense"),
                           c("downstream","retained",'IGR','Silent','Start_Codon_SNP',
-                            'Translation_Start_Site','Unknown','Intron',"3\'Flank","RNA","N.A."),
+                            'Translation_Start_Site','Unknown','Intron',"3\'Flank","RNA",
+                            "non_coding_transcript_exon_variant","intergenic","coding_sequence_variant","N.A."),
                           c("gain","Amp","amp",cnv.strings[[1]],"Gain"),
                           c("loss","Del","deletion",cnv.strings[[2]],"Loss"))
   }else{
     print(var.reduc.set)
     stop("variant recoding not recognized. is it formatted as a list or a str? (var.reduc.set)")
   }
-  # replace the variants 
+  # replace each variant function 
   recode_ <- function(vt, var.reduc.code){
     for (lst in var.reduc.code){
       for (term in lst[1:(length(lst)-1)]){
         if (grepl(term, vt, ignore.case=T)){
-          vt = lst[length(lst)]
-          return(vt)}
-      }}
-    return(vt)}
-  variant_classes_new = lapply(annotations, function(x) recode_(x, var.reduc.code))
-  if (any(is.na(variant_classes_new))){
-    print(unique(variants))
-    print(var.reduc.code)
-    stop("Some variants have no re-classification. Adjust var.reduc.code.")
+          vt.new = unlist(lst[[length(lst)]]) # substitute last term in list
+          return(vt.new)
+        }
+        }
+      }
+    return(vt) # return the original variant code if not found in lists
   }
+  
+  variant_classes_new = unlist(lapply(annotations, function(x) recode_(x, var.reduc.code)))
+  stopifnot(length(variant_classes_new) == length(annotations))
+  
+  #print(var.reduc.code)
+  print("Original annotations:")
+  print(table(annotations))
+  print("New annotations:")
+  print(table(variant_classes_new))
+  
   return(variant_classes_new)
 }
 
@@ -456,9 +465,7 @@ concordance_oncoprint <- function(snv.data=NA, cnv.data=NULL, clin.data=NA, df_s
   }else{
     cnv.data = standardize_names(cnv.data, warn = FALSE)
   }
-  if (!(is.na(patients))){
-    df_samples = df_samples %>% filter(PatientID %in% patients)
-	}
+  
   # filter input data by Patient
   stopifnot("PatientID" %in% names(clin.data))
   clin.data = clin.data %>% select(unique(c("PatientID", clin.data.cols))) %>%
@@ -468,6 +475,7 @@ concordance_oncoprint <- function(snv.data=NA, cnv.data=NULL, clin.data=NA, df_s
   if (!(is.na(patients))){
     df_samples = df_samples %>% filter(PatientID %in% patients)
   }else{
+    #patients = unique(df_samples$PatientID)
     patients=clin.data$PatientID[clin.data$PatientID %in% unique(df_samples$PatientID)]
   }
   # filter input data by sampleID
@@ -492,7 +500,7 @@ concordance_oncoprint <- function(snv.data=NA, cnv.data=NULL, clin.data=NA, df_s
   all.cnv_selected = merge.combine(all.cnv_selected,
                                    df_samples %>% select(SampleID.short, SampleType, StudyVisit, PatientID),
                                    join.type="left", join.cols.left = "SampleID.short", join.cols.right = "SampleID.short", priority = "right")
-  
+  print(nrow(all.cnv_selected))
   # set variant colors
   print("setting colors and symbols . . .")
   variant.classes = unlist(unique(c(all.cnv_selected$Variant_Classification, all.snv_selected$Variant_Classification)))
@@ -533,8 +541,9 @@ concordance_oncoprint <- function(snv.data=NA, cnv.data=NULL, clin.data=NA, df_s
   # use MAFtools to check and filter MAF data. maf format adds N.A. variants for samples w/no variants
   # TODO, maybe make this step optional
   print("Filtering MAF input . . .")
-  all.snv_selected_maf = format_as_MAF(all.snv_selected, df_samples = df_samples, variant.type="snv")
-  all.cnv_selected_maf = format_as_MAF(all.cnv_selected, df_samples = df_samples, variant.type="cnv")
+  all.snv_selected_maf = format_as_MAF(all.snv_selected, df_samples = df_samples, variant.type="snv", sid.format = sid.format)
+  all.cnv_selected_maf = format_as_MAF(all.cnv_selected, df_samples = df_samples, variant.type="cnv", sid.format = sid.format)
+  print(nrow(all.cnv_selected_maf))
   vc_nonsyn = unique(all.snv_selected_maf$Variant_Classification)
   vc_nonsyn = vc_nonsyn[!is.na(vc_nonsyn) & vc_nonsyn!="N.A."]
   dat <- read.maf(all.snv_selected_maf, 
@@ -628,6 +637,10 @@ concordance_oncoprint <- function(snv.data=NA, cnv.data=NULL, clin.data=NA, df_s
     df_plot_data = rbind(df_plot_data, df_missing)
     df_plot_data = df_plot_data[match(genes, rownames(df_plot_data)),]
   }
+  df_plot_data = df_plot_data %>% select(clin.data$PatientID) # order the data by patient order in clin.data
+  #print(head(df_plot_data))
+  #print(clin.data)
+  #stop()
   df_plot_data = as.matrix(df_plot_data)
   
   ### Main plotting function ####
