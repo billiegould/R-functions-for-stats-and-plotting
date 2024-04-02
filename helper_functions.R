@@ -5,6 +5,7 @@ library(stringr)
 library(glue)
 library(RColorBrewer)
 library(stats)
+library(ggsignif)
 
 options(stringsAsFactors = FALSE)
 
@@ -58,7 +59,7 @@ warn_na <- function(my.vector, my.vector.name=NA){
   }
   if (is.data.frame(my.vector)){
     for (col in names(my.vector)){
-      warn_(my.vector[[col]], col)
+      warn_(as.character(my.vector[[col]]), col)
     }
   }else{
     warn_(my.vector, my.vector.name)
@@ -133,17 +134,18 @@ merge_info <- function(colA, colB, priority="left", col_name="merge", warn=T){
 ##' @param reduce boolean whether to remove original columns or not. default: TRUE
 ##' 
 ##' @return merged data frame
-merge.combine <- function(df1, df2, join.type="left", join.cols.left="SampleID.short", join.cols.right="SampleID.short", 
+merge.combine <- function(df1, df2, join.type="left", join.cols=NULL, 
                           priority="right", reduce=TRUE, warn=T){
-  join.cols.right = as.vector(join.cols.right)
-  join.cols.left = as.vector(join.cols.left)
-  if (any(is.na(c(join.cols.left, join.type, join.cols.right)))){
-    stop("Must specify join.type AND join.by.left AND join.by.right column")
+
+  if (is.null(join.cols)){
+    join.cols = c("SampleID.short")
+    names(join.cols) <- c("SampleID.short")
+    print("Joining by SampleID.short . . .")
+  }else{
+    stopifnot(is.vector(join.cols) | is.list(join.cols))
   }
   join_ <- function(df1=df1, df2=df2, join.type=join.type, 
-                    join.cols.left=join.cols.left, join.cols.right=join.cols.right){
-    join.cols = join.cols.right
-    names(join.cols) <- join.cols.left
+                    join.cols=join.cols){
     if (join.type=="left"){
       df.merge = df1 %>% left_join(df2, by=join.cols, copy=TRUE)
     }else if(join.type=="right"){
@@ -165,18 +167,30 @@ merge.combine <- function(df1, df2, join.type="left", join.cols.left="SampleID.s
     print("Merging columns:")
     print(comm_cols)
   }
-  df.merge = join_(df1, df2, join.type, join.cols.left, join.cols.right)
+  # merge dfs by specified column names
+  df.merge = join_(df1, df2, join.type, join.cols)
+  print(names(df.merge))
+  # for overlapping columns, merge_info together
   for (col_str in comm_cols){
-    if (col_str %!in% c(join.cols.left,join.cols.right)){
+    if (col_str %!in% c(join.cols)){
+      print(col_str)
       colA = paste0(col_str, ".x")
       colB = paste0(col_str, ".y")
-      df.merge = df.merge %>% mutate({{col_str}} := merge_info(df.merge[[colA]],
-                                                               df.merge[[colB]],
+      if (any(is.numeric(df.merge[[colA]]),is.numeric(df.merge[[colB]]))){
+        df.merge = df.merge %>% mutate({{col_str}} := merge_info(as.numeric(df.merge[[colA]]),
+                                                               as.numeric(df.merge[[colB]]),
                                                                priority=priority,
                                                                col_name=col_str,
                                                                warn=warn))  
-    }
+      }else{
+        df.merge = df.merge %>% mutate({{col_str}} := merge_info(as.character(df.merge[[colA]]),
+                                                                 as.character(df.merge[[colB]]),
+                                                                 priority=priority,
+                                                                 col_name=col_str,
+                                                                 warn=warn))
+    }}
   }
+  
   if (reduce){
     df.merge = df.merge %>% select(-contains(".x"),-contains(".y"))
   }
@@ -281,6 +295,7 @@ get_random_color_dict <- function(names) {
 
 ## get p values for plottling
 get.p.table.mwu <- function(df, x, xlevs, y){
+  df = df %>% filter(!is.na({{y}}))
   filt = ifelse(df[[x]] == xlevs[[1]], TRUE, FALSE)
   lev1_vals = df[[y]][filt]
   print(glue("{xlevs[1]} median: {median(lev1_vals, na.rm=T)}"))
@@ -290,10 +305,10 @@ get.p.table.mwu <- function(df, x, xlevs, y){
                      not_lev1_vals, 
                      exact = FALSE, paired=FALSE)
   print(res)
-  if (res$p.value < 0.001){
-    p = "<0.001"
+  if (res$p.value < 0.0001){
+    p = "<0.0001"
   }else{
-    p = as.character(round(res$p.value, 3))
+    p = as.character(round(res$p.value, 4))
   }
   df_p = data.frame(x = xlevs, y=c(NA,NA), label=c("",""))
   if (max(lev1_vals, na.rm = T) >= max(not_lev1_vals, na.rm = T)){
@@ -304,7 +319,7 @@ get.p.table.mwu <- function(df, x, xlevs, y){
     df_p[1,"label"] <- paste0("p=",p)
   }
   names(df_p) <- c(x, y, "label") # use strings as labels
-  print(df_p)
+  #print(df_p)
   return(df_p)
 }
 
@@ -319,112 +334,187 @@ get.p.table.mwu <- function(df, x, xlevs, y){
 ##'
 ##'@return ggplot object
 quick_boxplot <- function(df, x, y, facet=NULL, colors=NULL, log.0.adj=NULL,
-                          print.p=TRUE, log.axes=FALSE, hline=NULL, plot.title=""){
+                          print.p=TRUE, log.axes=FALSE, hline=NULL, plot.title="",
+                          pt.label.col=NULL, fill.pts=FALSE, pt.fill.col=NULL, y.axis.dec.places=5){
+
+  cols = c(x, y, facet, pt.label.col, pt.fill.col)
+  stopifnot(all(cols[!is.null(cols)] %in% names(df)))
+  df = df[,cols[!is.null(cols)]]
+  
   if (!is.null(facet)){
     df = df %>% select({{x}},{{y}},{{facet}})
+  if (!is.null(pt.label)){
+    df = df %>% mutate("label" = as.factor(df[[pt.label]]))
+    pt.size = 0
   }else{
-    df = df %>% select({{x}},{{y}})
+    df = df %>% mutate("label" = "")
   }
   df[df=="NA"] <- NA
   df = df[complete.cases(df),]
   print(glue("Complete cases {y} by {x}: {nrow(df)}"))
+  
   if (is.null(colors)){
     colors = get_random_color_dict(df[[x]])
   }
-  stopifnot(is.factor(df[[x]]))
+  
+  df[[x]] = as.factor(df[[x]])
   df[[y]] = as.numeric(df[[y]])
   xlevs = levels(df[[x]])
+  print(xlevs)
   counts = df %>% group_by(df[x]) %>% summarize(count=n()) 
-  counts = counts %>% mutate("legend" = paste0(counts[[x]]," (n=",count,")"),
+  counts = data.frame(counts %>% mutate("legend" = paste0(counts[[x]]," (n=",count,")"),
                               "color"=recode(counts[[x]], !!!colors, .default = NA_character_),
-                             across(everything(), as.character))
+                             across(everything(), as.character)))
+  rownames(counts) <- counts[[x]]
+  counts = counts[xlevs, ]
   print(counts)
+  
+  ### PLOTTING
+  g <- ggplot(df, aes_string(x=x, y=y, fill=x, group=x))
+  
   if (!is.null(facet)){
-    print("y")
-    df = df %>% mutate({{facet}} := as.factor(df[[facet]]))
+    stopifnot(is.factor(df[[facet]]))
+    #df = df %>% mutate({{facet}} := as.factor(df[[facet]]))
     warn_na(df[[facet]], facet)
     p_dfs = list()
     facet.levs = levels(df[[facet]])
-    for (t in facet.levs){
-      print(glue("Level: {t}"))
-      df.facet = df %>% filter(eval(parse(text = glue("{facet} == '{t}'"))))
-      df_pi = get.p.table.mwu(df.facet, x, xlevs, y)
-      df_pi = df_pi %>% mutate({{facet}} := t)
-      p_dfs[[t]] <- df_pi
+    
+    if (length(levels(df[[x]])) > 2) {
+      #TODO: 
+      # comparisons = combn(levels(df.facet[[x]]),
+      #                     2, simplify = F)
+      # print(comparisons)
+      # g <- g +
+      #   geom_signif(test="wilcox.test", comparisons = comparisons,
+      #               step_increase = 0.2, map_signif_level = TRUE, textsize = 7)
+      print("todo: multi comparison P-val across facets")
+    }else{
+      for (t in facet.levs){
+          df.facet = df %>% filter(eval(parse(text = glue("{facet} == '{t}'"))))
+          print(df.facet)
+          df_pi = get.p.table.mwu(df.facet, x, xlevs, y)
+          df_pi = df_pi %>% mutate({{facet}} := t)
+          p_dfs[[t]] <- df_pi
+        }
+        print(length(p_dfs))
+        print(p_dfs[1])
+        df_p = do.call(rbind, p_dfs)
+        df_p = data.frame(df_p) 
+        print(df_p)
+        g <- g + 
+          facet_wrap(paste("~",facet)) +
+          geom_text(data=df_p, aes(x=.data[[x]], y=.data[[y]], group=.data[[facet]]), size=6, 
+                    label=df_p[["label"]], fontface="italic")
     }
-    print(length(p_dfs))
-    print(p_dfs[1])
-    df_p = do.call(rbind, p_dfs)
-    df_p = data.frame(df_p) 
-    print(df_p)
-  }else{
+    
+  }else{ #is.na(facet)
+    if ((length(levels(df[[x]])) > 2) & print.p){
+      comparisons = combn(levels(df[[x]]),
+                          2, simplify = F)
+      sigFunc = function(x){
+        if(x < 0.001){"***"} 
+        else if(x < 0.01){"**"}
+        else if(x < 0.05){"*"}
+        else{NA}}
+      g <- g +
+        geom_signif(test="wilcox.test", comparisons = comparisons,#[c(3,5)],
+                    step_increase = 0.2, 
+                    map_signif_level=sigFunc, 
+                    textsize = 7)
+    }else if (print.p){
       df_p = get.p.table.mwu(df, x, xlevs, y)
+      g <- g + 
+        geom_text(data=df_p, aes(x=.data[[x]], y=.data[[y]]), size=6, 
+                  label=df_p$label, fontface="italic") #+
+      # todo: get these labels to match plotting order
+        #scale_x_discrete(labels=paste0(counts[[x]], "\n(n=", counts[["count"]],")"))
+    }
   }
   
   # for plotting only
   if (log.axes){
-    if (any(df[[y]]==0)){
-      df[[y]] = df[[y]] + log.0.adj
+    if (!is.null(log.0.adj)){
+      df[[y]][df[[y]]==0] <- log.0.adj
     }else{
       df[[y]][df[[y]]==0] <- min(df[[y]])/10
     }
+    print(glue("for plotting log.0.adj={log.0.adj}"))
+    df[[y]] = df[[y]] + log.0.adj
   }
-  g <- ggplot(df, aes_string(x=x, y=y, fill=x)) +
+  
+  g <- g +
     geom_boxplot(outlier.shape=NA) +
-    geom_point(position=position_jitterdodge(), size=4, pch=1) +
     scale_fill_manual(labels=counts$legend, breaks=counts[[x]], values=counts$color) +
     ggtitle(plot.title) +
     theme(text = element_text(size = 20),
           #axis.text.x = element_blank(),
           plot.title = element_text(size = 14))
+  if (fill.pts){
+    g <- g + geom_point(aes(shape=.data[[pt.fill.col]]), position=position_jitterdodge(), size=4) +
+      scale_shape_manual(values=c(16,1)) #filled, open circle
+  }else{
+    g <- g + geom_point(position=position_jitterdodge(), size=4, pch=16) #filled circles
+  }
   if (log.axes){
-    scaleFUN <- function(x) sprintf("%.5f", x)
+    scaleFUN <- function(y) sprintf(glue("%.{y.axis.dec.places}f"), y)
     g <- g + 
-      scale_y_continuous(trans='log2', labels=scaleFUN)
+      scale_y_continuous(trans='log2', labels=scaleFUN#, 
+                         #limits=c(min(df[[y]], na.rm=TRUE), 
+                         #          max(df[[y]], na.rm=TRUE))
+                         )
   }
   if (!is.null(hline)){
     g <- g + geom_hline(aes(yintercept=hline), linetype="dashed", color="grey", size=1)
   }
-  if (!is.null(facet)){
-    g <- g + 
-      facet_wrap(paste("~",facet)) +
-      geom_text(data=df_p, aes_string(x=x, y=y, group=facet), size=6, 
-                label=df_p$label, fontface="italic")
-  }else{
-    g <- g + 
-      geom_text(data=df_p, aes_string(x=x, y=y), size=6, 
-                label=df_p$label, fontface="italic")
+  if (!is.null(pt.label.col)){
+    g <- g + geom_text(aes(label=.data[[pt.label.col]]), check_overlap = FALSE, position=position_jitter(),size=5)
   }
   #show(g)
   return(g)
 }
 
-## paired boxplot
-# pre_post_plot <- function(df, stat, outcome, colors){
-#   print(stat)
-#   formula = as.formula(paste0(stat,"~ StudyVisit"))
+# boxplot with lines: pre-nac vs post nac samples, outline points by recur vs. non-recur
+# pre_post_plot <- function(df, y, x, x.colors=NULL, line.group.var = "direction", 
+#                           line.colors=c("increase"="red","decrease"="blue"), facet=NULL){
+#   print(y)
+#   stopifnot(is.factor(df[[x]]))
+#   
+#   if (is.null(x.colors)){
+#     xlevs = levels(df[[x]])
+#     x.colors = rep("white", length(xlevs))
+#     names(x.colors) <- xlevs
+#   }
+#   
+#   formula = as.formula(paste0(y,"~ StudyVisit"))
 #   res <- wilcox.test(formula, data = df, exact = FALSE, paired=TRUE)
 #   print(res)
 #   
-#   df_plot = df[,c("StudyVisit","PatientID", stat, outcome)]
-#   df_plot = df_plot %>% rename("stat" = {{stat}}) %>%
-#     mutate("StudyVisit" = factor(StudyVisit, levels=c("Pre-NAC","Post-NAC"))) %>% 
-#     group_by(PatientID) %>% 
-#     mutate(direction=ifelse((stat[StudyVisit=="Pre-NAC"]-stat[StudyVisit=="Post-NAC"])>0,"decrease",
-#                             ifelse((stat[StudyVisit=="Pre-NAC"]-stat[StudyVisit=="Post-NAC"])<0,"increase", "neutral")),
-#            pre.post.pct.diff = (stat[StudyVisit=="Pre-NAC"]-stat[StudyVisit=="Post-NAC"])/mean(stat))
-#   print(df_plot)  
+#   if (line.group.var=="direction"){
+#     df_plot = df[,unique(c(facet, y, x, "PatientID"))]
+#   }else{
+#     df_plot = df[,unique(c(facet, y, x, line.group.var, "PatientID"))]
+#   }
 #   
-#   gg <- ggplot(df_plot, aes_string(x="StudyVisit", y="stat")) + 
+#   df_plot = df_plot %>% mutate("stat" = df_plot[[y]], "group"=df_plot[[x]]) %>% 
+#     #arrange(PatientID, {{x}}) %>% # post, pre, alphabetical
+#     group_by(PatientID) %>% 
+#     mutate(diff = (stat[group=="Post-NAC"]-stat[group=="Pre-NAC"]), #/mean(stat),  
+#            direction=ifelse((diff < 0),"decrease","increase")
+#     ) %>% ungroup()
+#   print(df_plot %>% arrange(PatientID, {{x}}) %>% relocate(diff, direction, stat), n=100)
+#   
+#   gg <- ggplot(df_plot, aes_string(x=x, y=y)) + 
 #     geom_boxplot(outlier.shape=NA) + 
-#     #scale_x_discrete("StudyVisit", labels = c("Pre-NAC","Post-NAC")) + 
+#     #scale_fill_manual(x, values=x.colors) + #TODO fix this
+#     #scale_x_discrete(x, colors=x.colors) + 
 #     geom_point(size=4, pch=1) +
-#     geom_line(aes(group = PatientID, colour = direction), linetype = 1) +
-#     scale_color_manual(values=c("increase"="red","decrease"="blue","neutral"="grey")) +
+#     
+#     geom_line(aes_string(group="PatientID", colour = line.group.var), linetype = 1) +
+#     scale_color_manual(values=line.colors) +
 #     scale_y_continuous(trans='log2') + 
-#     #scale_fill_manual(values=c("red","blue")) +
-#     facet_grid(glue(". ~ {outcome}")) +
-#     labs(y=stat, title=stat) + 
+#     
+#     facet_wrap(paste("~", facet)) +
+#     labs(y=y, title=y) + 
 #     theme(text = element_text(size = 20),
 #           strip.text = element_text(size=20),
 #           axis.ticks = element_blank(), 
@@ -436,7 +526,7 @@ quick_boxplot <- function(df, x, y, facet=NULL, colors=NULL, log.0.adj=NULL,
 ## contingency plot
 contingency_plot <- function(df, x = NULL, y=NULL, 
                              colors=c("FALSE"="steelblue3","TRUE"="indianred"), 
-                             y.percent=TRUE, facet=NULL){
+                             y.percent=TRUE, facet=NULL, title=""){
   df$X = factor(df[[x]])
   df$Y = factor(df[[y]])
   warn_na(df$X)
@@ -448,27 +538,21 @@ contingency_plot <- function(df, x = NULL, y=NULL,
   if (length(colors) != length(ylevs)){
     colors = get_random_color_dict(names = ylevs)
   }
-  # for plotting only
-  # if (log.axes){
-  #   if (any(df[[y]]==0)){
-  #     df[[y]] = df[[y]] + log.0.adj
-  #   }else{
-  #     df[[y]][df[[y]]==0] <- min(df[[y]])/10
-  #   }
-  # }
   gg <- ggplot(df) +
-    geom_bar(aes(x=Y, fill=X), position="fill", color="black") +
+    geom_bar(aes(x=X, fill=Y), position="fill", color="black") +
     scale_fill_manual(name = y, values=colors, labels=paste0(ylevs, " (n=", table(df$Y), ")")) +
-    scale_x_discrete(labels=paste0(xlevs, "\n(n=", table(df$X), ")")) +
-    theme(text = element_text(size = 16))
+    scale_x_discrete(name=x, labels=paste0(xlevs, "\n(n=", table(df$X), ")")) +
+    theme(text = element_text(size = 16)) +
+    ggtitle(title)
   if (y.percent){
     gg <- gg +
       scale_y_continuous(labels = scales::percent) +
       labs(y="Percent of Patients", x=x)
   }
-  print(y)
   
   if (!is.null(facet)){
+    ## fix this code
+    stop("no facet support yet")
     xlevs = levels(df$X)
     ylevs = levels(df$Y)
     n.0 = sum(df$X==xlevs[1])
@@ -513,7 +597,7 @@ contingency_plot <- function(df, x = NULL, y=NULL,
     res = fisher.test(as.matrix(tab))
     print(res)
   }
-  show(gg)
+  #show(gg)
   return(gg)
 }
 
@@ -527,4 +611,51 @@ check.missing <- function(list.ref, list.test){
     print(list.all)
     print(data.frame("level"=list.all, "in.test.list"=list.all %in% list.test, "in.ref.list"=list.all %in% list.ref))
   }
+}
+
+
+##### Get optimal and target sens and spec for a data set, optionally print ROC curve.
+#####
+get_sens_spec <- function(df, label_col, score_col, title=NA, thresh=NA, target_sens=NA, 
+                          target_spec=NA, text.cex = 2, print.thres="best"){
+  library(pROC)
+  #print(label_col %in% names(df))
+  #print(score_col %in% names(df))
+  #print(sum(!is.na(df[[score_col]])))
+  df = df %>% rename("label"={{label_col}}, "score"={{score_col}}) %>% 
+    mutate("label"=as.character(label))
+  #print(glue("number of NA labels: {sum(is.na(df$label))}"))
+  print(table(df$label, useNA = "always"))
+  
+  if (!is.na(thresh)){
+    TP = nrow(df %>% filter(label=="TRUE", score >= thresh))
+    FN = nrow(df %>% filter(label=="TRUE", score < thresh))
+    TN = nrow(df %>% filter(label=="FALSE", score < thresh))
+    FP = nrow(df %>% filter(label=="FALSE", score >= thresh))
+    sens = TP/(TP + FN)
+    spec = TN/(TN + FP)
+    print(paste("Threshold Sens:", sens))
+    print(paste("Threshold Spec:", spec))
+  }
+  
+  pROC_obj <- roc_(data=df, response="label", predictor="score", 
+                   smooth = FALSE, plot=FALSE, direction="<") # controls score lower than cases
+  if (!is.na(title)){
+    plot.roc(pROC_obj, auc.polygon=TRUE, max.auc.polygon=FALSE, grid=TRUE, 
+             #ci = TRUE, ci.type = "bars", #ci.type=c("bars", "shape", "no")
+             print.auc=TRUE, print.thres=print.thres, main=title, asp = NA, print.auc.cex=text.cex)
+  }
+  print(coords(pROC_obj, x=print.thres))
+  
+  if (!is.na(target_sens)){
+    print(sprintf("target SENS %s", target_sens))
+    print(coords(pROC_obj, x=target_sens, input="sensitivity", 
+                 ret=c("threshold","specificity", "sensitivity")))
+  }
+  if (!is.na(target_spec)){
+    print(sprintf("target SPEC %s", target_spec))
+    print(coords(pROC_obj, x=target_spec, input="specificity", 
+                 ret=c("threshold","specificity", "sensitivity")))
+  }
+  print(paste0("AUC: ", auc(pROC_obj)))
 }
