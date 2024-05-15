@@ -486,6 +486,12 @@ concordance_oncoprint <- function(snv.data=NA, cnv.data=NULL, clin.data=NA, df_s
   stopifnot(all(!(duplicated(df_samples$Tumor_Sample_Barcode))))
 
   print("selecting snvs . . .")
+  if (!is.null(genes)){
+    all.snv_selected = snv.data %>% filter(Hugo_Symbol %in% genes)
+  }else{
+    all.snv_selected = snv.data
+  }
+  stopifnot(nrow(all.snv_selected) > 1)
   all.snv_selected = snv.data %>% filter(SampleID.short %in% df_samples$SampleID.short,
                                          !grepl("synon", Variant_Classification, ignore.case=T),
                                          !is.na(Variant_Classification)) %>%
@@ -495,11 +501,16 @@ concordance_oncoprint <- function(snv.data=NA, cnv.data=NULL, clin.data=NA, df_s
                                    df_samples %>% select(SampleID.short, SampleType, StudyVisit, PatientID))
 
   print("selecting cnvs . . .")
+  if (!is.null(genes)){
+    all.cnv_selected = cnv.data %>% filter(Hugo_Symbol %in% genes)
+  }else{
+    all.cnv_selected = cnv.data
+  }
   all.cnv_selected = cnv.data %>% filter(SampleID.short %in% df_samples$SampleID.short, !is.na(Hugo_Symbol)) %>% 
     mutate(Variant_Classification=recode.variants(Variant_Classification, var.reduc.set, cnv.strings))
   all.cnv_selected = merge.combine(all.cnv_selected,
                                    df_samples %>% select(SampleID.short, SampleType, StudyVisit, PatientID),
-                                   join.type="left", join.cols.left = "SampleID.short", join.cols.right = "SampleID.short", priority = "right")
+                                   join.type="left",  priority = "right", join.cols="SampleID.short")
   print(nrow(all.cnv_selected))
   # set variant colors
   print("setting colors and symbols . . .")

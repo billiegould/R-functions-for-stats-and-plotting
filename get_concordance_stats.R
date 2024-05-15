@@ -102,8 +102,9 @@ concordance_venn <- function(variants, samples=NULL, selectors=NULL,
   if (!is.null(samples)){
     samples = standardize_names(samples, input.type="samples")
     variants = variants %>% filter(SampleID.short %in% samples$SampleID.short) 
-    variants = merge.combine(variants, samples, join.type = "left",join.cols.left = "SampleID.short",
-                             join.cols.right = "SampleID.short", priority = "right", warn=FALSE)
+    variants = merge.combine(variants, samples, join.type = "left",
+                             join.cols = "SampleID.short", priority = "right", 
+                             warn=FALSE)
     n.patients = length(unique(variants$PatientID))
   }else{
     stop("Missing sample list input.")

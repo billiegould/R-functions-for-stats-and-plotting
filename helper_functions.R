@@ -336,15 +336,16 @@ get.p.table.mwu <- function(df, x, xlevs, y){
 quick_boxplot <- function(df, x, y, facet=NULL, colors=NULL, log.0.adj=NULL,
                           print.p=TRUE, log.axes=FALSE, hline=NULL, plot.title="",
                           pt.label.col=NULL, fill.pts=FALSE, pt.fill.col=NULL, y.axis.dec.places=5){
-
+  
   cols = c(x, y, facet, pt.label.col, pt.fill.col)
   stopifnot(all(cols[!is.null(cols)] %in% names(df)))
   df = df[,cols[!is.null(cols)]]
   
   if (!is.null(facet)){
     df = df %>% select({{x}},{{y}},{{facet}})
-  if (!is.null(pt.label)){
-    df = df %>% mutate("label" = as.factor(df[[pt.label]]))
+  }
+  if (!is.null(pt.label.col)){
+    df = df %>% mutate("label" = as.factor(df[[pt.label.col]]))
     pt.size = 0
   }else{
     df = df %>% mutate("label" = "")
@@ -433,10 +434,8 @@ quick_boxplot <- function(df, x, y, facet=NULL, colors=NULL, log.0.adj=NULL,
   
   # for plotting only
   if (log.axes){
-    if (!is.null(log.0.adj)){
-      df[[y]][df[[y]]==0] <- log.0.adj
-    }else{
-      df[[y]][df[[y]]==0] <- min(df[[y]])/10
+    if (is.null(log.0.adj)){
+      log.0.adj = min(df[[y]][df[[y]] != 0])/10
     }
     print(glue("for plotting log.0.adj={log.0.adj}"))
     df[[y]] = df[[y]] + log.0.adj
@@ -473,7 +472,7 @@ quick_boxplot <- function(df, x, y, facet=NULL, colors=NULL, log.0.adj=NULL,
   return(g)
 }
 
-# boxplot with lines: pre-nac vs post nac samples, outline points by recur vs. non-recur
+# boxplot with lines between boxes for each group: pre-nac vs post nac samples, outline points by recur vs. non-recur
 # pre_post_plot <- function(df, y, x, x.colors=NULL, line.group.var = "direction", 
 #                           line.colors=c("increase"="red","decrease"="blue"), facet=NULL){
 #   print(y)
@@ -619,12 +618,8 @@ check.missing <- function(list.ref, list.test){
 get_sens_spec <- function(df, label_col, score_col, title=NA, thresh=NA, target_sens=NA, 
                           target_spec=NA, text.cex = 2, print.thres="best"){
   library(pROC)
-  #print(label_col %in% names(df))
-  #print(score_col %in% names(df))
-  #print(sum(!is.na(df[[score_col]])))
   df = df %>% rename("label"={{label_col}}, "score"={{score_col}}) %>% 
     mutate("label"=as.character(label))
-  #print(glue("number of NA labels: {sum(is.na(df$label))}"))
   print(table(df$label, useNA = "always"))
   
   if (!is.na(thresh)){
