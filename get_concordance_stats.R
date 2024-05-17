@@ -95,10 +95,9 @@ get_concordance_stats <- function(variant.data, ref_sample_type, df_samples, out
 ##' 
 ##' @return a eulerr plot object
 concordance_venn <- function(variants, samples=NULL, selectors=NULL, 
-                             colors=NULL, cex=1.5, fontsize = 10){
-  print(table(variants$SampleType, variants$StudyVisit))
+                             colors=NULL, cex=1.5, fontsize = 10,
+                             plot.title=NULL){
   variants = standardize_names(variants)
-  print(table(variants$SampleType, variants$StudyVisit))
   if (!is.null(samples)){
     samples = standardize_names(samples, input.type="samples")
     variants = variants %>% filter(SampleID.short %in% samples$SampleID.short) 
@@ -132,12 +131,16 @@ concordance_venn <- function(variants, samples=NULL, selectors=NULL,
     plot_list[[sel]]=df$label
   }
   # fix this: stopifnot(length(unlist(plot_list))==nrow(variants))
+  if (is.null(plot.title)){
+    plot.title = glue("N Patients: {n.patients}")
+  }
+  
   v <- euler(plot_list) # function converts list to alphabetical order by label
   eulerr_options(padding = unit(5, "mm"))
-  plot(v, quantities = list(type = "counts", cex=cex),
+  plt <- plot(v, quantities = list(type = "counts", cex=cex),
           fills = list(fill = colors, alpha=0.6),
           legend = list(plot=TRUE, fontsize = fontsize),
-          main=glue("N Patients: {n.patients}"))
-  #show(plt)
-  #return(c("plot"=NULL,"colors"=colors)) # func does not return plot object, ## fix.
+          main=plot.title)
+  print(plt)
+  return() # fix: return plot object of class 'eulergram'.
 }

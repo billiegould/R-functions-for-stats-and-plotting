@@ -647,11 +647,12 @@ concordance_oncoprint <- function(snv.data=NA, cnv.data=NULL, clin.data=NA, df_s
     names(df_missing) <- names(df_plot_data)
     df_plot_data = rbind(df_plot_data, df_missing)
     df_plot_data = df_plot_data[match(genes, rownames(df_plot_data)),]
+    # reorder selected genes by mutation frequency high to low
+    df_plot_data = df_plot_data[order(rowSums(df_plot_data != ""),decreasing=TRUE),]
   }
-  df_plot_data = df_plot_data %>% select(clin.data$PatientID) # order the data by patient order in clin.data
+  # order cols by patient order in clin.data
+  df_plot_data = df_plot_data %>% select(clin.data$PatientID) 
   #print(head(df_plot_data))
-  #print(clin.data)
-  #stop()
   df_plot_data = as.matrix(df_plot_data)
   
   ### Main plotting function ####

@@ -169,7 +169,7 @@ merge.combine <- function(df1, df2, join.type="left", join.cols=NULL,
   }
   # merge dfs by specified column names
   df.merge = join_(df1, df2, join.type, join.cols)
-  print(names(df.merge))
+  #print(names(df.merge))
   # for overlapping columns, merge_info together
   for (col_str in comm_cols){
     if (col_str %!in% c(join.cols)){
