@@ -135,7 +135,7 @@ merge_info <- function(colA, colB, priority="left", col_name="merge", warn=T){
 ##' 
 ##' @return merged data frame
 merge.combine <- function(df1, df2, join.type="left", join.cols=NULL, 
-                          priority="right", reduce=TRUE, warn=T){
+                          priority="right", reduce=TRUE, warn=FALSE){
 
   if (is.null(join.cols)){
     join.cols = c("SampleID.short")
